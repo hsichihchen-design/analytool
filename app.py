@@ -32,9 +32,9 @@ for key, value in default_states.items():
         st.session_state[key] = value
 
 # ==========================================
-# 1. 全域設定與 CSS
+# 1. 全域設定與 CSS (極致緊湊版)
 # ==========================================
-st.set_page_config(page_title="作圖小工具 V37 (火力全開版)", layout="wide", page_icon="🔥")
+st.set_page_config(page_title="作圖小工具 V37.1", layout="wide", page_icon="✨")
 
 def inject_custom_css(font_family):
     st.markdown(f"""
@@ -44,41 +44,43 @@ def inject_custom_css(font_family):
         }}
         .stDownloadButton button {{ width: 100%; border-color: #4CAF50; color: #4CAF50; }}
         
-        /* 按鈕樣式：固定高度，自動換行 */
+        /* 極致緊湊按鈕 */
         div.stButton > button {{
             width: 100%; 
-            min-height: 70px; 
+            min-height: 45px;  /* 壓縮高度 */
             height: 100%;
-            white-space: normal; 
-            word-wrap: break-word;
-            padding: 8px 12px; 
-            line-height: 1.3; 
-            border-radius: 8px; 
-            border: 1px solid #e0e0e0;
+            padding: 6px 10px; /* 減少內距 */
+            line-height: 1.2; 
+            border-radius: 6px; 
+            border: 1px solid #e6e6e6;
             background-color: #ffffff; 
             text-align: left; 
             display: flex; 
             align-items: center;
-            font-size: 0.95rem;
-            box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+            font-size: 0.9rem; /* 字體微調 */
+            box-shadow: 0 1px 2px rgba(0,0,0,0.02);
         }}
         div.stButton > button:hover {{
             border-color: #7c4dff; 
             color: #7c4dff; 
-            background-color: #f5f0ff;
-            transform: translateY(-2px);
-            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            background-color: #f8f5ff;
+            transform: translateY(-1px);
+            box-shadow: 0 3px 5px rgba(0,0,0,0.08);
         }}
         
+        /* 壓縮群組標題間距 */
         .group-header {{
             font-weight: 700; 
-            font-size: 1.1rem; 
-            color: #444;
-            margin-top: 25px; 
-            margin-bottom: 10px; 
-            padding-bottom: 5px;
-            border-bottom: 2px solid #f0f2f6;
+            font-size: 1rem; 
+            color: #555;
+            margin-top: 15px; 
+            margin-bottom: 5px; 
+            padding-bottom: 3px;
+            border-bottom: 1px solid #eee;
         }}
+        
+        /* 隱藏不必要的空白 */
+        .block-container {{ padding-top: 2rem; }}
         
         [data-testid="stSidebar"] [data-testid="stTextInput"] input {{
             border-color: #7c4dff;
@@ -95,7 +97,7 @@ def get_valid_model():
     try:
         models = [m for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
         for m in models: 
-            if 'flash' in m.name: return m.name # 優先用 Flash (速度快，適合生成20個)
+            if 'flash' in m.name: return m.name
         for m in models:
             if 'pro' in m.name: return m.name
         return 'gemini-pro'
@@ -111,7 +113,6 @@ def analyze_with_gemini(df, api_key):
         model_name = get_valid_model()
         model = genai.GenerativeModel(model_name)
 
-        # 準備資料摘要：加入統計特徵以避免幻覺
         stats_info = {}
         for col in df.columns:
             n_unique = df[col].nunique()
@@ -121,32 +122,30 @@ def analyze_with_gemini(df, api_key):
                 stats_info[col] += f", Examples: {list(df[col].unique())}"
 
         columns_summary = json.dumps(stats_info, ensure_ascii=False, indent=2)
-        data_preview = df.head(5).to_markdown(index=False)
+        data_preview = df.head(3).to_markdown(index=False) # 縮減到3筆，夠了
 
-        # === 優化 Prompt：要求 20 個建議 ===
+        # === 優化 Prompt：強制極短標題 ===
         prompt = f"""
-        你是一位頂尖的商業數據分析師。請深入分析以下 datasets，盡可能挖掘出所有有價值的分析視角。
+        你是一位精通 UX 設計的數據分析師。請分析以下資料，並提供 20 個最有價值的圖表建議。
         
-        【欄位統計特徵】：
+        【欄位統計】：
         {columns_summary}
         
         【數據預覽】：
         {data_preview}
         
-        **請提供 20 個最有商業價值的圖表建議。**
-        (如果資料維度不足以產生 20 個，請提供盡可能多的不重複建議，至少 10 個以上)
+        【極致簡潔規則】：
+        1. **標題極短**：標題嚴格限制在 **10 個中文字以內**。例如用「地區營收」取代「各地區的銷售金額總計」。
+        2. **去除贅詞**：不要包含「分析」、「統計」、「圖表」等字眼。
+        3. **多樣性**：包含趨勢、排行、佔比、交叉、分佈等不同視角。
+        4. **雙軸防呆**：若建議雙軸圖，左右軸必須是不同欄位。
+        5. **視覺防呆**：分類 > 20 不畫圓餅圖；分類 > 50 不畫長條圖(除非Top N)。
         
-        【重要原則】：
-        1. **多樣性**：請包含趨勢、排行、佔比、交叉分析、分佈、雙軸圖等多種視角。
-        2. **視覺規則**：Unique Values > 20 的欄位不要畫圓餅圖；Unique Values > 50 的欄位不要畫長條圖(除非是Top排行)。
-        3. **雙軸圖**：若建議雙軸圖，左右軸必須是不同的數值欄位 (例如：銷售額 vs 利潤)。
-        4. **標題簡潔**：圖表標題請控制在 15 字以內。
-        
-        請務必回傳 **純 JSON 格式** (不要 markdown)，格式如下：
+        請回傳 **純 JSON 格式**：
         [
             {{
-                "group": "群組 (例如: 📈 趨勢分析, 🏆 銷售排行, 🍰 結構佔比, 📊 交叉分析, 🔗 關聯分析)",
-                "title": "圖表標題",
+                "group": "群組 (例如: 趨勢/排行/佔比/交叉)",
+                "title": "極短標題 (Max 10字)",
                 "chart_type": "圖表類型", 
                 "x_col": "X軸欄位",
                 "y_col": "Y軸欄位",
@@ -155,7 +154,7 @@ def analyze_with_gemini(df, api_key):
             }}
         ]
         
-        【可用的 chart_type】:
+        【可用圖表類型】:
         "長條圖 (Bar)", "折線圖 (Line)", "雙軸組合圖 (Combo)", "圓餅圖 (Pie)", "樹狀圖 (TreeMap)", 
         "散佈圖 (Scatter)", "箱型圖 (Box Plot)", "面積圖 (Area)", "直方圖 (Histogram)", "雷達圖 (Radar)"
         """
@@ -178,24 +177,21 @@ def analyze_with_gemini(df, api_key):
 # ==========================================
 def get_manual_content():
     return """
-# 📊 作圖小工具 (V37 火力全開版) 使用手冊
-
-本版本解鎖了 AI 的潛力，一次提供 20 個分析視角。
+# 📊 作圖小工具 (V37.1) 使用手冊
 
 ## 1. 🔑 啟動 AI
 1. 前往 Google AI Studio 申請免費 Key。
 2. 貼入左側「🔑 Gemini API Key」欄位並點擊驗證。
 
-## 2. 🤖 智慧分析 (20+ Insights)
-上傳檔案後，AI 會深度掃描資料，嘗試生成 20 個不同的分析圖表建議。
-* **等待時間**：由於運算量較大，請耐心等待約 10 秒鐘。
-* **分組顯示**：建議會依照「趨勢」、「排行」、「佔比」自動分類，方便您尋找。
+## 2. 🤖 智慧分析
+上傳檔案後，AI 會自動生成 20 個精簡標題的分析建議。
+點擊按鈕，圖表與設定會自動同步。
 
 ## 3. 🛠️ 常見問題
-* **Q: 為什麼有些建議看起來很像？**
-  A: 當資料欄位較少時，AI 為了湊滿 20 個建議，可能會從不同角度(如不同圖表類型)呈現同一組數據。
-* **Q: 雙軸圖報錯？**
-  A: 本版本已內建防呆機制，若左右軸欄位相同，程式會自動修正為單一數值顯示。
+* **Q: 雙軸圖左右軸重複？**
+  A: 程式已內建防呆，若重複會自動顯示為單軸，您可手動調整右軸為不同欄位。
+* **Q: 圖表太密？**
+  A: 使用左側「X 軸範圍」縮放，或切換為「趨勢圖」觀看。
 
 祝您分析愉快！
     """
@@ -242,7 +238,7 @@ def load_data(file):
 # ==========================================
 # 4. 主介面開始
 # ==========================================
-st.title("🔥 作圖小工具 (V37 火力全開版)")
+st.title("✨ 作圖小工具 (Gemini AI版)")
 
 with st.sidebar:
     st.header("1. 資料來源")
@@ -305,17 +301,11 @@ if uploaded_files:
 
         # === AI 分析建議區 ===
         st.markdown("---")
-        st.subheader("🤖 Gemini 智慧分析建議 (20+ Insights)")
+        st.subheader("🤖 Gemini 智慧分析建議")
         
         if st.session_state['gemini_api_key']:
-            # 這裡使用簡單的邏輯：只要換檔案或剛輸入Key，就重新分析
-            # 為了避免重複觸發，檢查 session state
-            should_analyze = False
             if 'last_analyzed_file' not in st.session_state or st.session_state['last_analyzed_file'] != selected_file_name:
-                should_analyze = True
-            
-            if should_analyze:
-                with st.spinner("🤖 AI 正在腦力激盪，生成 20 個分析視角... (約需 10 秒)"):
+                with st.spinner("🤖 AI 正在生成精簡分析建議..."):
                     insights, error_msg = analyze_with_gemini(df, st.session_state['gemini_api_key'])
                     if error_msg:
                         st.error(error_msg)
@@ -357,12 +347,7 @@ if uploaded_files:
 
                                 sync_box('x_col_idx', 'x_col_box', all_cols, insight.get('x_col'))
                                 sync_box('y_col_idx', 'y_col_box', num_cols, insight.get('y_col'))
-                                
-                                # 雙軸圖防呆: 只有當 AI 真的給了不同的 y_col_2 時才設定，否則預設跟 y_col 一樣(然後被下面邏輯過濾)
-                                # 這裡簡化處理：如果 AI 沒給 y_col_2 參數(通常沒有)，我們就讓 UI 保持現狀或預設
-                                # 若要更聰明，可以在 Prompt 要求回傳 y_col_2，但目前 V35.1 邏輯已足夠處理單一 Metrics
                                 sync_box('y_col_2_idx', 'y_col_2_box', num_cols, insight.get('y_col')) 
-                                
                                 sync_box('color_col_idx', 'color_col_box', ["(無)"]+all_cols, insight.get('color_col'))
                                 
                                 if c_type == "樹狀圖 (TreeMap)" and insight.get('x_col'):
@@ -373,7 +358,7 @@ if uploaded_files:
         else:
             st.warning("請輸入 API Key 以啟用智慧分析。")
 
-        # === 側邊欄與繪圖設定 (維持 V35.1 修復版) ===
+        # === 側邊欄與繪圖設定 ===
         with st.sidebar:
             st.markdown("---")
             st.header("2. 繪圖設定")
@@ -523,7 +508,6 @@ if uploaded_files:
                     grp_cols = [x_col]
                     if color_col != "(無)" and color_col in df.columns: grp_cols.append(color_col)
                     
-                    # 雙軸防呆邏輯
                     metrics = [y_col]
                     if y_col_2 != y_col: metrics.append(y_col_2)
                         
