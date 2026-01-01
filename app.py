@@ -32,9 +32,9 @@ for key, value in default_states.items():
         st.session_state[key] = value
 
 # ==========================================
-# 1. 全域設定與 CSS (極致壓縮版)
+# 1. 全域設定與 CSS (7欄極限版)
 # ==========================================
-st.set_page_config(page_title="作圖小工具 V37.2", layout="wide", page_icon="✨")
+st.set_page_config(page_title="作圖小工具 V38 (七欄極限版)", layout="wide", page_icon="✨")
 
 def inject_custom_css(font_family):
     st.markdown(f"""
@@ -44,14 +44,14 @@ def inject_custom_css(font_family):
         }}
         .stDownloadButton button {{ width: 100%; border-color: #4CAF50; color: #4CAF50; }}
         
-        /* 極致壓縮按鈕樣式 (適合 5-6 欄佈局) */
+        /* 七欄佈局專用按鈕樣式 */
         div.stButton > button {{
             width: 100%; 
-            min-height: 42px;  /* 高度壓縮 */
+            min-height: 45px;  
             height: 100%;
             white-space: normal; 
             word-wrap: break-word;
-            padding: 4px 8px; /* 內距極小化 */
+            padding: 4px 6px; /* 極小內距 */
             line-height: 1.2; 
             border-radius: 4px; 
             border: 1px solid #ddd;
@@ -59,7 +59,7 @@ def inject_custom_css(font_family):
             text-align: left; 
             display: flex; 
             align-items: center;
-            font-size: 0.85rem; /* 字體稍小以容納文字 */
+            font-size: 0.8rem; /* 字體縮小以適應窄欄寬 */
             box-shadow: 0 1px 1px rgba(0,0,0,0.05);
         }}
         div.stButton > button:hover {{
@@ -70,19 +70,18 @@ def inject_custom_css(font_family):
             z-index: 1;
         }}
         
-        /* 群組標題更緊湊 */
         .group-header {{
             font-weight: 700; 
-            font-size: 0.95rem; 
+            font-size: 0.9rem; 
             color: #666;
-            margin-top: 12px; 
+            margin-top: 10px; 
             margin-bottom: 4px; 
             padding-bottom: 2px;
             border-bottom: 1px solid #eee;
         }}
         
-        /* 調整上方空白 */
-        .block-container {{ padding-top: 1.5rem; }}
+        /* 減少上方留白 */
+        .block-container {{ padding-top: 1rem; }}
         
         [data-testid="stSidebar"] [data-testid="stTextInput"] input {{
             border-color: #7c4dff;
@@ -126,22 +125,23 @@ def analyze_with_gemini(df, api_key):
         columns_summary = json.dumps(stats_info, ensure_ascii=False, indent=2)
         data_preview = df.head(3).to_markdown(index=False)
 
-        # === 優化 Prompt：強制 10 字內 ===
+        # === Prompt：嚴格限制 10 字 ===
         prompt = f"""
-        你是一位數據分析師。請分析以下資料，提供 20 個分析圖表建議。
+        你是一位數據分析師。請分析資料，提供 20 個分析圖表建議。
         
-        【欄位統計】：
+        【欄位統計 (AI決策依據)】：
         {columns_summary}
         
         【數據預覽】：
         {data_preview}
         
         【規則】：
-        1. **標題限制**：嚴格控制在 **10 個中文字以內**。例如用「各區營收」取代「各地區的銷售金額」。
-        2. **去除贅詞**：不要包含「分析」、「統計」、「圖表」、「分佈」等字眼，直接講重點。
-        3. **多樣性**：包含趨勢、排行、佔比、交叉、分佈。
+        1. **標題限制**：嚴格控制在 **10 個中文字以內** (因為按鈕很窄)。例如「各區營收」優於「各地區銷售總額」。
+        2. **去除贅詞**：不要包含「分析」、「統計」、「圖表」等字。
+        3. **視覺防呆**：
+           - Unique > 20：禁止圓餅圖。
+           - Unique > 50：禁止長條圖 (除非是 Top N)。
         4. **雙軸防呆**：左右軸必須是不同欄位。
-        5. **視覺防呆**：分類 > 20 不畫圓餅圖；分類 > 50 不畫長條圖(除非Top N)。
         
         請回傳 **純 JSON 格式**：
         [
@@ -179,18 +179,19 @@ def analyze_with_gemini(df, api_key):
 # ==========================================
 def get_manual_content():
     return """
-# 📊 作圖小工具 (V37.2 極致版) 使用手冊
+# 📊 作圖小工具 (V38 七欄極限版) 使用手冊
 
 ## 1. 🔑 啟動 AI
 1. 前往 Google AI Studio 申請免費 Key。
 2. 貼入左側「🔑 Gemini API Key」欄位並點擊驗證。
 
 ## 2. 🤖 智慧分析
-上傳檔案後，AI 會自動生成 20 個精簡標題的分析建議，並以 5 欄高密度排列。
+上傳檔案後，AI 會參考資料統計特徵 (如分類數量)，生成 20 個最合理的圖表建議。
+V38 版採用 7 欄高密度排列，讓您一眼看盡所有重要資訊。
 
 ## 3. 🛠️ 操作技巧
 * **點擊即看**：點擊任一按鈕，圖表與設定自動同步。
-* **高密度儀表板**：適合在大螢幕上快速瀏覽所有分析視角。
+* **空間利用**：建議使用電腦版瀏覽器並開啟全螢幕，以獲得最佳體驗。
 
 祝您分析愉快！
     """
@@ -319,12 +320,12 @@ if uploaded_files:
                 for group_name in groups:
                     st.markdown(f"<div class='group-header'>{group_name}</div>", unsafe_allow_html=True)
                     
-                    # === 核心修改：5 欄佈局 ===
-                    cols = st.columns(5) # 這裡改為 5
+                    # === 核心修改：7 欄佈局 ===
+                    cols = st.columns(7) 
                     
                     group_insights = [ins for ins in insights if ins['group'] == group_name]
                     for i, insight in enumerate(group_insights):
-                        with cols[i % 5]: # 這裡也要對應改為 5
+                        with cols[i % 7]: # 循環放入 7 欄
                             if st.button(insight['title'], key=f"btn_{group_name}_{i}"):
                                 c_type = insight.get('chart_type', '長條圖 (Bar)')
                                 if c_type not in chart_types_list: c_type = '長條圖 (Bar)'
@@ -360,7 +361,7 @@ if uploaded_files:
         else:
             st.warning("請輸入 API Key 以啟用智慧分析。")
 
-        # === 側邊欄與繪圖設定 ===
+        # === 側邊欄與繪圖設定 (維持 V35.1 修復版) ===
         with st.sidebar:
             st.markdown("---")
             st.header("2. 繪圖設定")
