@@ -32,9 +32,9 @@ for key, value in default_states.items():
         st.session_state[key] = value
 
 # ==========================================
-# 1. 全域設定與 CSS (極致緊湊版)
+# 1. 全域設定與 CSS (極致壓縮版)
 # ==========================================
-st.set_page_config(page_title="作圖小工具 V37.1", layout="wide", page_icon="✨")
+st.set_page_config(page_title="作圖小工具 V37.2", layout="wide", page_icon="✨")
 
 def inject_custom_css(font_family):
     st.markdown(f"""
@@ -44,43 +44,45 @@ def inject_custom_css(font_family):
         }}
         .stDownloadButton button {{ width: 100%; border-color: #4CAF50; color: #4CAF50; }}
         
-        /* 極致緊湊按鈕 */
+        /* 極致壓縮按鈕樣式 (適合 5-6 欄佈局) */
         div.stButton > button {{
             width: 100%; 
-            min-height: 45px;  /* 壓縮高度 */
+            min-height: 42px;  /* 高度壓縮 */
             height: 100%;
-            padding: 6px 10px; /* 減少內距 */
+            white-space: normal; 
+            word-wrap: break-word;
+            padding: 4px 8px; /* 內距極小化 */
             line-height: 1.2; 
-            border-radius: 6px; 
-            border: 1px solid #e6e6e6;
+            border-radius: 4px; 
+            border: 1px solid #ddd;
             background-color: #ffffff; 
             text-align: left; 
             display: flex; 
             align-items: center;
-            font-size: 0.9rem; /* 字體微調 */
-            box-shadow: 0 1px 2px rgba(0,0,0,0.02);
+            font-size: 0.85rem; /* 字體稍小以容納文字 */
+            box-shadow: 0 1px 1px rgba(0,0,0,0.05);
         }}
         div.stButton > button:hover {{
             border-color: #7c4dff; 
             color: #7c4dff; 
             background-color: #f8f5ff;
             transform: translateY(-1px);
-            box-shadow: 0 3px 5px rgba(0,0,0,0.08);
+            z-index: 1;
         }}
         
-        /* 壓縮群組標題間距 */
+        /* 群組標題更緊湊 */
         .group-header {{
             font-weight: 700; 
-            font-size: 1rem; 
-            color: #555;
-            margin-top: 15px; 
-            margin-bottom: 5px; 
-            padding-bottom: 3px;
+            font-size: 0.95rem; 
+            color: #666;
+            margin-top: 12px; 
+            margin-bottom: 4px; 
+            padding-bottom: 2px;
             border-bottom: 1px solid #eee;
         }}
         
-        /* 隱藏不必要的空白 */
-        .block-container {{ padding-top: 2rem; }}
+        /* 調整上方空白 */
+        .block-container {{ padding-top: 1.5rem; }}
         
         [data-testid="stSidebar"] [data-testid="stTextInput"] input {{
             border-color: #7c4dff;
@@ -122,11 +124,11 @@ def analyze_with_gemini(df, api_key):
                 stats_info[col] += f", Examples: {list(df[col].unique())}"
 
         columns_summary = json.dumps(stats_info, ensure_ascii=False, indent=2)
-        data_preview = df.head(3).to_markdown(index=False) # 縮減到3筆，夠了
+        data_preview = df.head(3).to_markdown(index=False)
 
-        # === 優化 Prompt：強制極短標題 ===
+        # === 優化 Prompt：強制 10 字內 ===
         prompt = f"""
-        你是一位精通 UX 設計的數據分析師。請分析以下資料，並提供 20 個最有價值的圖表建議。
+        你是一位數據分析師。請分析以下資料，提供 20 個分析圖表建議。
         
         【欄位統計】：
         {columns_summary}
@@ -134,11 +136,11 @@ def analyze_with_gemini(df, api_key):
         【數據預覽】：
         {data_preview}
         
-        【極致簡潔規則】：
-        1. **標題極短**：標題嚴格限制在 **10 個中文字以內**。例如用「地區營收」取代「各地區的銷售金額總計」。
-        2. **去除贅詞**：不要包含「分析」、「統計」、「圖表」等字眼。
-        3. **多樣性**：包含趨勢、排行、佔比、交叉、分佈等不同視角。
-        4. **雙軸防呆**：若建議雙軸圖，左右軸必須是不同欄位。
+        【規則】：
+        1. **標題限制**：嚴格控制在 **10 個中文字以內**。例如用「各區營收」取代「各地區的銷售金額」。
+        2. **去除贅詞**：不要包含「分析」、「統計」、「圖表」、「分佈」等字眼，直接講重點。
+        3. **多樣性**：包含趨勢、排行、佔比、交叉、分佈。
+        4. **雙軸防呆**：左右軸必須是不同欄位。
         5. **視覺防呆**：分類 > 20 不畫圓餅圖；分類 > 50 不畫長條圖(除非Top N)。
         
         請回傳 **純 JSON 格式**：
@@ -177,21 +179,18 @@ def analyze_with_gemini(df, api_key):
 # ==========================================
 def get_manual_content():
     return """
-# 📊 作圖小工具 (V37.1) 使用手冊
+# 📊 作圖小工具 (V37.2 極致版) 使用手冊
 
 ## 1. 🔑 啟動 AI
 1. 前往 Google AI Studio 申請免費 Key。
 2. 貼入左側「🔑 Gemini API Key」欄位並點擊驗證。
 
 ## 2. 🤖 智慧分析
-上傳檔案後，AI 會自動生成 20 個精簡標題的分析建議。
-點擊按鈕，圖表與設定會自動同步。
+上傳檔案後，AI 會自動生成 20 個精簡標題的分析建議，並以 5 欄高密度排列。
 
-## 3. 🛠️ 常見問題
-* **Q: 雙軸圖左右軸重複？**
-  A: 程式已內建防呆，若重複會自動顯示為單軸，您可手動調整右軸為不同欄位。
-* **Q: 圖表太密？**
-  A: 使用左側「X 軸範圍」縮放，或切換為「趨勢圖」觀看。
+## 3. 🛠️ 操作技巧
+* **點擊即看**：點擊任一按鈕，圖表與設定自動同步。
+* **高密度儀表板**：適合在大螢幕上快速瀏覽所有分析視角。
 
 祝您分析愉快！
     """
@@ -301,7 +300,7 @@ if uploaded_files:
 
         # === AI 分析建議區 ===
         st.markdown("---")
-        st.subheader("🤖 Gemini 智慧分析建議")
+        st.subheader("🤖 Gemini 智慧分析建議 (20+ Insights)")
         
         if st.session_state['gemini_api_key']:
             if 'last_analyzed_file' not in st.session_state or st.session_state['last_analyzed_file'] != selected_file_name:
@@ -319,10 +318,13 @@ if uploaded_files:
                 
                 for group_name in groups:
                     st.markdown(f"<div class='group-header'>{group_name}</div>", unsafe_allow_html=True)
-                    cols = st.columns(3)
+                    
+                    # === 核心修改：5 欄佈局 ===
+                    cols = st.columns(5) # 這裡改為 5
+                    
                     group_insights = [ins for ins in insights if ins['group'] == group_name]
                     for i, insight in enumerate(group_insights):
-                        with cols[i % 3]:
+                        with cols[i % 5]: # 這裡也要對應改為 5
                             if st.button(insight['title'], key=f"btn_{group_name}_{i}"):
                                 c_type = insight.get('chart_type', '長條圖 (Bar)')
                                 if c_type not in chart_types_list: c_type = '長條圖 (Bar)'
