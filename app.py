@@ -7,7 +7,7 @@ import io
 import numpy as np
 import random
 from datetime import datetime, timedelta
-import re # 引入正規表達式模組
+import re 
 
 # ==========================================
 # 0. 初始化 Session State
@@ -41,6 +41,7 @@ def inject_custom_css(font_family):
             font-family: '{font_family}', 'Microsoft JhengHei', sans-serif !important;
         }}
         .stDownloadButton button {{ width: 100%; border-color: #4CAF50; color: #4CAF50; }}
+        /* 智慧建議按鈕樣式 */
         div.stButton > button {{
             width: 100%; min-height: 60px; height: auto; white-space: normal; word-wrap: break-word;
             padding: 10px 15px; line-height: 1.5; border-radius: 8px; border: 1px solid #e0e0e0;
@@ -66,7 +67,6 @@ def get_column_score(col_name, data_series, role):
     col_str = str(col_name).lower()
     
     # === A. 關鍵字加權 (Keyword Heuristics) ===
-    # 定義常見的中英文關鍵字
     keywords = {
         'metric': ['amount', 'sales', 'profit', 'cost', 'price', 'qty', 'quantity', 'revenue', 'margin', 'score', 
                    '金額', '銷售', '營收', '利潤', '毛利', '成本', '數量', '單價', '分數', '人次'],
@@ -76,35 +76,33 @@ def get_column_score(col_name, data_series, role):
                  '日期', '時間', '年', '月', '日', '季', '週']
     }
     
-    # 負面關鍵字 (看起來像數值但其實是ID)
     id_keywords = ['id', 'no', 'code', 'phone', 'zip', 'lat', 'lon', 'year', 'month', 'day', # year有時不適合作為加總數值
                    '編號', '代碼', '電話', '郵遞', '經度', '緯度']
 
     if any(k in col_str for k in keywords[role]):
-        score += 10  # 命中關鍵字大加分
+        score += 10 
     
     if role == 'metric':
         if any(k in col_str for k in id_keywords):
-            score -= 20 # 如果是 ID 類的數字，大幅扣分 (避免畫出 "總訂單編號" 這種怪圖)
+            score -= 20 
 
     # === B. 統計特徵加權 (Statistical Heuristics) ===
     n_unique = data_series.nunique()
-    n_total = len(data_series)
     
     if role == 'dimension':
-        if 1 < n_unique < 50: score += 5  # 分類數量適中，適合做 X 軸或顏色
-        if n_unique > 100: score -= 10    # 分類太多 (如 ID)，不適合做圖
-        if n_unique == 1: score -= 5      # 只有一種值，沒分析價值
-        if data_series.dtype == 'object': score += 2 # 文字型態加分
+        if 1 < n_unique < 50: score += 5 
+        if n_unique > 100: score -= 10   
+        if n_unique == 1: score -= 5      
+        if data_series.dtype == 'object': score += 2 
 
     if role == 'metric':
         if pd.api.types.is_numeric_dtype(data_series):
             score += 5
-            # 排除看起來像年份的數字 (例如 2023, 2024)，通常年份是維度而非指標
+            # 排除看起來像年份的數字
             if data_series.mean() > 1900 and data_series.mean() < 2100 and data_series.std() < 5:
                 score -= 10 
         else:
-            score -= 100 # 非數字絕對不能當 Metric
+            score -= 100 
 
     return score
 
@@ -112,7 +110,6 @@ def generate_insights_advanced(df):
     insights = []
     
     # 1. 智慧盤點欄位 (Smart Column Picking)
-    # 找出所有可能的候選人
     all_num_cols = df.select_dtypes(include=['number']).columns.tolist()
     all_cat_cols = df.select_dtypes(exclude=['number', 'datetime']).columns.tolist()
     
@@ -121,17 +118,14 @@ def generate_insights_advanced(df):
     if time_cols:
         best_date_col = time_cols[0] 
     else:
-        # 沒生成的話，找原始日期欄位
         raw_date_cols = [c for c in df.columns if pd.api.types.is_datetime64_any_dtype(df[c])]
         best_date_col = raw_date_cols[0] if raw_date_cols else None
 
     # --- 找出最佳數值欄位 (Top 3 Metrics) ---
-    # 計算每個數值欄位的「指標分數」
     metric_scores = []
     for col in all_num_cols:
         s = get_column_score(col, df[col], 'metric')
         metric_scores.append((col, s))
-    # 排序並取前 3 名 (分數必須 > 0)
     metric_scores.sort(key=lambda x: x[1], reverse=True)
     top_metrics = [m[0] for m in metric_scores if m[1] > 0][:3]
     
@@ -143,7 +137,6 @@ def generate_insights_advanced(df):
     dim_scores.sort(key=lambda x: x[1], reverse=True)
     top_dims = [d[0] for d in dim_scores if d[1] > 0][:3]
 
-    # 若沒有足夠資訊，回傳空
     if not top_metrics: return []
 
     chart_types = ["長條圖 (Bar)", "折線圖 (Line)", "雙軸組合圖 (Combo)", "圓餅圖 (Pie)", "樹狀圖 (TreeMap)", 
@@ -152,25 +145,25 @@ def generate_insights_advanced(df):
 
     # === 生成建議策略 (Strategies) ===
 
-    # 策略 A: 趨勢 (Trend) - 只要有日期和指標
+    # 策略 A: 趨勢 (Trend)
     if best_date_col:
-        for num in top_metrics[:2]: # 針對前兩個最重要的指標
+        for num in top_metrics[:2]:
             insights.append({
                 "group": "📈 趨勢分析 (Trend)",
                 "title": f"{num} 的時間走勢",
                 "params": {"chart_type_idx": chart_types.index("折線圖 (Line)"), "x_col_name": best_date_col, "y_col_name": num, "agg_func_idx": 0, "sort_order_idx": 0}
             })
 
-    # 策略 B: 排行 (Ranking) - 針對最重要的分類 + 最重要的指標
+    # 策略 B: 排行 (Ranking)
     for cat in top_dims[:2]: 
-        num = top_metrics[0] # 用最重要的指標(通常是金額)來看
+        num = top_metrics[0]
         insights.append({
             "group": "🏆 重點排行 (Ranking)",
             "title": f"各 {cat} 的 {num} 表現",
             "params": {"chart_type_idx": chart_types.index("長條圖 (Bar)"), "x_col_name": cat, "y_col_name": num, "agg_func_idx": 0, "sort_order_idx": sort_orders.index("數值由大到小 (Desc)")}
         })
 
-    # 策略 C: 交叉 (Cross) - 如果有兩個以上的好分類
+    # 策略 C: 交叉 (Cross)
     if len(top_dims) >= 2:
         c1, c2 = top_dims[0], top_dims[1]
         num = top_metrics[0]
@@ -180,7 +173,7 @@ def generate_insights_advanced(df):
             "params": {"chart_type_idx": chart_types.index("長條圖 (Bar)"), "x_col_name": c1, "y_col_name": num, "color_col_name": c2, "agg_func_idx": 0, "sort_order_idx": sort_orders.index("數值由大到小 (Desc)")}
         })
 
-    # 策略 D: 結構 (Composition) - 針對分類數量適中的
+    # 策略 D: 結構 (Composition)
     for cat in top_dims:
         n = df[cat].nunique()
         num = top_metrics[0]
@@ -196,9 +189,9 @@ def generate_insights_advanced(df):
                 "title": f"{cat} 的規模 (樹狀圖)",
                 "params": {"chart_type_idx": chart_types.index("樹狀圖 (TreeMap)"), "treemap_path": [cat], "y_col_name": num, "agg_func_idx": 0, "sort_order_idx": 0}
             })
-             break # 樹狀圖一個就夠
+             break 
 
-    # 策略 E: 關聯 (Correlation) - 如果有兩個數字指標
+    # 策略 E: 關聯 (Correlation)
     if len(top_metrics) >= 2:
         n1, n2 = top_metrics[0], top_metrics[1]
         insights.append({
@@ -210,10 +203,52 @@ def generate_insights_advanced(df):
     return insights
 
 # ==========================================
-# 3. 資料生成與說明書 (維持 V30)
+# 3. 資料生成與說明書 (V31版)
 # ==========================================
 def get_manual_content():
-    return """(請保留上一版的說明書內容)"""
+    return """
+# 📊 作圖小工具 (V31) 使用手冊
+
+## 1. 📂 資料準備 (關鍵第一步)
+本工具內建「語意分析 AI」，為了讓它精準判讀，請準備 **「一維明細表 (流水帳)」**。
+
+### ✅ 正確格式範例
+每一列 (Row) 是一筆獨立紀錄，第一列是標題。
+| 訂單日期 | 地區 | 產品名稱 | 銷售金額 | 利潤 |
+| :--- | :--- | :--- | :--- | :--- |
+| 2024-01-01 | 台北 | 智慧手機 | 25000 | 5000 |
+| 2024-01-02 | 台中 | 無線耳機 | 3000 | 800 |
+
+### ❌ 常見錯誤 (請避免)
+1. **統計報表**：不要上傳已經算好「1月總計、2月總計」的表格。
+2. **合併儲存格**：請取消所有合併，確保程式能讀取每一格。
+3. **特殊符號**：金額欄位請用純數字 (如 `1000`)，不要包含 `$`、`NTD` 或 `元`。
+
+## 2. 🤖 智慧分析操作 (Strategic Insights)
+上傳檔案後，系統會自動執行以下動作：
+1. **語意偵測**：自動尋找關鍵字 (如：Sales, Amount, Date, Region...)。
+2. **生成建議**：在主畫面產生分類好的分析按鈕：
+   - 📈 **趨勢 (Trend)**：自動繪製時間走勢圖。
+   - 🏆 **排行 (Ranking)**：自動列出前幾名的分類排行。
+   - 📊 **交叉 (Cross)**：分析兩個維度 (如地區 vs 產品) 的分佈。
+   - 🔗 **關聯 (Correlation)**：若有多個數值，自動分析相關性。
+3. **一鍵生成**：點擊按鈕，圖表與左側設定會自動跳轉到位！
+
+## 3. 🛠️ 手動微調與進階設定
+您依然可以在左側側邊欄進行細微調整：
+- **⏳ 時間粒度**：若有日期欄位，可一鍵切換 年/季/月/週/日 視角。
+- **📊 圖表類型**：支援 雙軸圖 (Combo)、樹狀圖 (TreeMap)、雷達圖等 11 種圖表。
+- **🔢 美化設定**：
+  - **排序**：設定「數值由大到小」讓長條圖更整齊。
+  - **目標線**：輸入 KPI 數字，圖表會顯示紅色虛線。
+  - **數值標籤**：可設定顯示位數與位置 (如置中、上方)。
+
+## 4. 💾 輸出成果
+- **📷 下載圖片**：滑鼠移至圖表右上角的相機圖示，下載 4K 高畫質 PNG。
+- **📥 下載 HTML**：點擊下方綠色按鈕，下載可互動的網頁檔。
+
+祝您分析順利！
+    """
 
 @st.cache_data
 def generate_demo_excel():
@@ -263,7 +298,7 @@ def load_data(file):
         return None
 
 # ==========================================
-# 4. 主介面開始 (含戰情儀表板)
+# 4. 主介面開始
 # ==========================================
 st.title("📊 作圖小工具")
 
@@ -291,6 +326,7 @@ if uploaded_files:
     df = load_data(current_file)
     
     if df is not None:
+        # 時間粒度
         date_cols = [c for c in df.columns if pd.api.types.is_datetime64_any_dtype(df[c])]
         if date_cols:
             with st.sidebar:
@@ -344,7 +380,7 @@ if uploaded_files:
                             st.rerun()
                 st.markdown("---")
 
-        # === 側邊欄與繪圖 (同 V30) ===
+        # === 側邊欄與繪圖設定 ===
         with st.sidebar:
             st.markdown("---")
             st.header("2. 繪圖設定")
