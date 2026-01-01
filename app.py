@@ -34,7 +34,7 @@ for key, value in default_states.items():
 # ==========================================
 # 1. 全域設定與 CSS
 # ==========================================
-st.set_page_config(page_title="作圖小工具 V35 (AI驗證版)", layout="wide", page_icon="✨")
+st.set_page_config(page_title="作圖小工具 V37 (火力全開版)", layout="wide", page_icon="🔥")
 
 def inject_custom_css(font_family):
     st.markdown(f"""
@@ -44,20 +44,40 @@ def inject_custom_css(font_family):
         }}
         .stDownloadButton button {{ width: 100%; border-color: #4CAF50; color: #4CAF50; }}
         
+        /* 按鈕樣式：固定高度，自動換行 */
         div.stButton > button {{
-            width: 100%; min-height: 50px; height: auto; white-space: normal; word-wrap: break-word;
-            padding: 8px 12px; line-height: 1.3; border-radius: 6px; border: 1px solid #e0e0e0;
-            background-color: #ffffff; text-align: left; display: flex; align-items: center;
+            width: 100%; 
+            min-height: 70px; 
+            height: 100%;
+            white-space: normal; 
+            word-wrap: break-word;
+            padding: 8px 12px; 
+            line-height: 1.3; 
+            border-radius: 8px; 
+            border: 1px solid #e0e0e0;
+            background-color: #ffffff; 
+            text-align: left; 
+            display: flex; 
+            align-items: center;
             font-size: 0.95rem;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.05);
         }}
         div.stButton > button:hover {{
-            border-color: #7c4dff; color: #7c4dff; background-color: #f5f0ff;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.05); transform: translateY(-1px);
+            border-color: #7c4dff; 
+            color: #7c4dff; 
+            background-color: #f5f0ff;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
         }}
         
         .group-header {{
-            font-weight: 600; font-size: 1rem; color: #555;
-            margin-top: 15px; margin-bottom: 8px; display: flex; align-items: center;
+            font-weight: 700; 
+            font-size: 1.1rem; 
+            color: #444;
+            margin-top: 25px; 
+            margin-bottom: 10px; 
+            padding-bottom: 5px;
+            border-bottom: 2px solid #f0f2f6;
         }}
         
         [data-testid="stSidebar"] [data-testid="stTextInput"] input {{
@@ -67,27 +87,20 @@ def inject_custom_css(font_family):
     """, unsafe_allow_html=True)
 
 # ==========================================
-# 2. 核心功能：Gemini AI 分析引擎 (含動態搜尋)
+# 2. 核心功能：Gemini AI 分析引擎
 # ==========================================
 
 def get_valid_model():
-    """
-    動態詢問 Google 有哪些模型可用，避免 404 錯誤。
-    """
+    """動態取得可用模型，避免 404"""
     try:
-        # 列出所有模型
         models = [m for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
-        
-        # 優先尋找 Flash (快) -> Pro (穩)
-        for m in models:
-            if 'flash' in m.name: return m.name
+        for m in models: 
+            if 'flash' in m.name: return m.name # 優先用 Flash (速度快，適合生成20個)
         for m in models:
             if 'pro' in m.name: return m.name
-            
-        # 如果都沒找到，回傳預設
         return 'gemini-pro'
     except:
-        return 'gemini-pro' # 發生錯誤時的保底
+        return 'gemini-pro'
 
 def analyze_with_gemini(df, api_key):
     if not api_key:
@@ -95,39 +108,54 @@ def analyze_with_gemini(df, api_key):
 
     try:
         genai.configure(api_key=api_key)
-        
-        # === 核心修正：動態取得可用模型 ===
         model_name = get_valid_model()
         model = genai.GenerativeModel(model_name)
 
-        data_preview = df.head(5).to_markdown(index=False)
-        columns_info = str(df.dtypes.to_dict())
+        # 準備資料摘要：加入統計特徵以避免幻覺
+        stats_info = {}
+        for col in df.columns:
+            n_unique = df[col].nunique()
+            dtype = str(df[col].dtype)
+            stats_info[col] = f"Type: {dtype}, Unique: {n_unique}"
+            if n_unique < 10:
+                stats_info[col] += f", Examples: {list(df[col].unique())}"
 
+        columns_summary = json.dumps(stats_info, ensure_ascii=False, indent=2)
+        data_preview = df.head(5).to_markdown(index=False)
+
+        # === 優化 Prompt：要求 20 個建議 ===
         prompt = f"""
-        你是一位專業的商業數據分析師。請分析以下 datasets 的欄位結構與內容樣本：
+        你是一位頂尖的商業數據分析師。請深入分析以下 datasets，盡可能挖掘出所有有價值的分析視角。
         
-        【資料預覽】：
+        【欄位統計特徵】：
+        {columns_summary}
+        
+        【數據預覽】：
         {data_preview}
         
-        【欄位型態】：
-        {columns_info}
+        **請提供 20 個最有商業價值的圖表建議。**
+        (如果資料維度不足以產生 20 個，請提供盡可能多的不重複建議，至少 10 個以上)
         
-        請提供 6 到 9 個「最有商業分析價值」的圖表建議。
-        請務必回傳 **純 JSON 格式** (不要有 markdown 標記)，不要包含 ```json ... ```，直接回傳 JSON 陣列。格式如下：
+        【重要原則】：
+        1. **多樣性**：請包含趨勢、排行、佔比、交叉分析、分佈、雙軸圖等多種視角。
+        2. **視覺規則**：Unique Values > 20 的欄位不要畫圓餅圖；Unique Values > 50 的欄位不要畫長條圖(除非是Top排行)。
+        3. **雙軸圖**：若建議雙軸圖，左右軸必須是不同的數值欄位 (例如：銷售額 vs 利潤)。
+        4. **標題簡潔**：圖表標題請控制在 15 字以內。
+        
+        請務必回傳 **純 JSON 格式** (不要 markdown)，格式如下：
         [
             {{
-                "group": "群組名稱 (例如: 📈 趨勢分析, 🏆 銷售排行, 🍰 結構佔比, 📊 交叉分析)",
-                "title": "圖表標題 (例如: 各地區銷售額排行)",
-                "chart_type": "對應的圖表類型", 
-                "x_col": "X軸欄位名稱 (必須完全符合資料欄位)",
-                "y_col": "Y軸欄位名稱 (必須完全符合資料欄位)",
-                "color_col": "顏色分組欄位 (可選，若無則填 null)",
-                "sort": "排序方式 (desc, asc, none)"
-            }},
-            ...
+                "group": "群組 (例如: 📈 趨勢分析, 🏆 銷售排行, 🍰 結構佔比, 📊 交叉分析, 🔗 關聯分析)",
+                "title": "圖表標題",
+                "chart_type": "圖表類型", 
+                "x_col": "X軸欄位",
+                "y_col": "Y軸欄位",
+                "color_col": "顏色欄位(可null)",
+                "sort": "desc/asc/none"
+            }}
         ]
         
-        【可用的 chart_type (請嚴格選用以下名稱)】:
+        【可用的 chart_type】:
         "長條圖 (Bar)", "折線圖 (Line)", "雙軸組合圖 (Combo)", "圓餅圖 (Pie)", "樹狀圖 (TreeMap)", 
         "散佈圖 (Scatter)", "箱型圖 (Box Plot)", "面積圖 (Area)", "直方圖 (Histogram)", "雷達圖 (Radar)"
         """
@@ -143,62 +171,53 @@ def analyze_with_gemini(df, api_key):
         return insights, None
 
     except Exception as e:
-        return None, f"AI 分析失敗 (使用模型: {model_name}): {str(e)}"
+        return None, f"AI 分析失敗: {str(e)}"
 
 # ==========================================
-# 3. 詳細版使用說明書
+# 3. 使用說明書
 # ==========================================
 def get_manual_content():
     return """
-# 📊 作圖小工具 (V35 AI版) 使用手冊
+# 📊 作圖小工具 (V37 火力全開版) 使用手冊
 
-## 1. 🔑 啟動 AI (必要步驟)
-1. **申請 Key**：前往 [Google AI Studio](https://aistudio.google.com/app/apikey) 免費申請。
-2. **輸入 Key**：貼入左側側邊欄的「🔑 Gemini API Key」。
-3. **點擊驗證**：按下「✅ 驗證 Key」按鈕，確認連線成功。
+本版本解鎖了 AI 的潛力，一次提供 20 個分析視角。
 
-## 2. 📂 資料準備
-請準備 **「一維明細表 (流水帳)」**。
-範例：
-| 日期 | 產品 | 金額 |
-| :--- | :--- | :--- |
-| 1/1  | A    | 100  |
+## 1. 🔑 啟動 AI
+1. 前往 Google AI Studio 申請免費 Key。
+2. 貼入左側「🔑 Gemini API Key」欄位並點擊驗證。
 
-## 3. 🤖 智慧分析
-上傳檔案後，AI 會自動讀取前 5 筆資料並生成建議。點擊按鈕即可一鍵作圖。
+## 2. 🤖 智慧分析 (20+ Insights)
+上傳檔案後，AI 會深度掃描資料，嘗試生成 20 個不同的分析圖表建議。
+* **等待時間**：由於運算量較大，請耐心等待約 10 秒鐘。
+* **分組顯示**：建議會依照「趨勢」、「排行」、「佔比」自動分類，方便您尋找。
 
-## 4. 🛠️ 手動微調
-AI 生成後，您可於左側自由調整圖表類型、顏色與排序。
+## 3. 🛠️ 常見問題
+* **Q: 為什麼有些建議看起來很像？**
+  A: 當資料欄位較少時，AI 為了湊滿 20 個建議，可能會從不同角度(如不同圖表類型)呈現同一組數據。
+* **Q: 雙軸圖報錯？**
+  A: 本版本已內建防呆機制，若左右軸欄位相同，程式會自動修正為單一數值顯示。
 
 祝您分析愉快！
     """
 
 @st.cache_data
 def generate_demo_excel():
-    rows = 20000
+    rows = 2000
     start_date = datetime(2023, 1, 1)
-    dates = [start_date + timedelta(days=random.randint(0, 730)) for _ in range(rows)]
-    locations = {'北區': ['台北信義', '新北板橋'], '中區': ['台中旗艦', '新竹巨城'], '南區': ['高雄巨蛋', '台南西門']}
+    dates = [start_date + timedelta(days=random.randint(0, 365)) for _ in range(rows)]
+    locations = {'北區': ['台北', '新北'], '中區': ['台中', '新竹'], '南區': ['高雄', '台南']}
     regions, cities = [], []
     for _ in range(rows):
         r = random.choice(list(locations.keys()))
         regions.append(r)
         cities.append(random.choice(locations[r]))
-    cats = ['消費電子', '辦公家具', '生活家電']
-    prods = {'消費電子': ['手機', '耳機'], '辦公家具': ['工學椅', '升降桌'], '生活家電': ['清淨機', '氣炸鍋']}
-    c_list, p_list = [], []
-    for _ in range(rows):
-        c = random.choice(cats)
-        c_list.append(c)
-        p_list.append(random.choice(prods[c]))
+    cats = ['電子', '家具', '家電']
+    c_list = [random.choice(cats) for _ in range(rows)]
     df = pd.DataFrame({
-        '訂單日期': dates, '地區': regions, '門市': cities, '產品類別': c_list, '產品名稱': p_list,
-        '銷售渠道': np.random.choice(['官網', '門市', '蝦皮'], rows),
-        '銷售階段': np.random.choice(['1.接觸', '2.詢價', '3.下單', '4.結案'], rows, p=[0.4, 0.3, 0.2, 0.1]),
-        '業務員': np.random.choice(['小明', '大華', '美美', '志豪'], rows),
+        '訂單日期': dates, '地區': regions, '門市': cities, '產品類別': c_list,
         '銷售金額': np.random.randint(1000, 50000, rows),
-        '利潤': np.random.randint(-500, 10000, rows),
-        '運送天數': np.random.poisson(3, rows) + 1,
+        '利潤': np.random.randint(100, 5000, rows),
+        '運送天數': np.random.poisson(3, rows),
         '滿意度': np.random.randint(1, 6, rows)
     })
     output = io.BytesIO()
@@ -223,44 +242,33 @@ def load_data(file):
 # ==========================================
 # 4. 主介面開始
 # ==========================================
-st.title("✨ 作圖小工具 (Gemini AI版)")
+st.title("🔥 作圖小工具 (V37 火力全開版)")
 
 with st.sidebar:
     st.header("1. 資料來源")
     
-    # === API Key 輸入與驗證區 ===
-    st.session_state['gemini_api_key'] = st.text_input("🔑 Gemini API Key", value=st.session_state['gemini_api_key'], type="password", help="請輸入您的 Google Gemini API Key 以啟用智慧分析功能")
+    st.session_state['gemini_api_key'] = st.text_input("🔑 Gemini API Key", value=st.session_state['gemini_api_key'], type="password")
     
-    # 新增：驗證按鈕
     if st.button("✅ 驗證 API Key", use_container_width=True):
         if not st.session_state['gemini_api_key']:
             st.error("請先輸入 Key")
         else:
             try:
                 genai.configure(api_key=st.session_state['gemini_api_key'])
-                # 嘗試列出模型來測試連線
                 models = list(genai.list_models())
-                if models:
-                    st.success(f"🎉 連線成功！可用模型數: {len(models)}")
-                else:
-                    st.warning("連線成功但無可用模型，請檢查 Google Cloud 權限。")
+                st.success(f"連線成功！")
             except Exception as e:
-                st.error(f"❌ 連線失敗: {e}")
+                st.error(f"連線失敗: {e}")
 
-    if not st.session_state['gemini_api_key']:
-        st.caption("👉 [點此申請免費 Key](https://aistudio.google.com/app/apikey)")
-    
     st.markdown("---")
     
-    with st.expander("📥 下載範例與說明書 (Resources)", expanded=False):
-        manual_txt = get_manual_content()
-        st.download_button(label="📄 下載使用說明書 (.txt)", data=manual_txt, file_name="User_Manual.txt", mime="text/plain")
-        if st.button("🎲 生成並下載 2萬筆範例資料"):
-            with st.spinner("正在生成..."):
-                excel_data = generate_demo_excel()
-                st.download_button(label="📊 點此儲存範例 Excel (.xlsx)", data=excel_data, file_name="Demo_Big_Data_20k.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+    with st.expander("📥 下載範例與說明書", expanded=False):
+        st.download_button("📄 下載說明書", get_manual_content(), "User_Manual.txt")
+        if st.button("🎲 生成範例資料"):
+            excel_data = generate_demo_excel()
+            st.download_button("📊 下載 Excel", excel_data, "Demo_Data.xlsx")
     
-    font_choice = st.selectbox("字體", ["Microsoft JhengHei", "華康粗圓體", "華康儷中黑", "Arial"], index=0)
+    font_choice = st.selectbox("字體", ["Microsoft JhengHei", "Arial"], index=0)
     inject_custom_css(font_choice)
     uploaded_files = st.file_uploader("上傳 Excel/CSV", type=["xlsx", "csv"], accept_multiple_files=True)
 
@@ -278,14 +286,13 @@ if uploaded_files:
         if date_cols:
             with st.sidebar:
                 st.markdown("---")
-                st.header("⏳ 時間設定")
-                time_granularity = st.selectbox("時間粒度", ["年-月 (Default)", "年 (Year)", "季 (Quarter)", "週 (Week)", "日 (Day)"])
+                time_granularity = st.selectbox("⏳ 時間粒度", ["年-月 (Default)", "年", "季", "週", "日"])
             for col in date_cols:
                 time_col_name = f"{col}(時間)"
-                if time_granularity == "年 (Year)": df[time_col_name] = df[col].dt.strftime('%Y')
-                elif time_granularity == "季 (Quarter)": df[time_col_name] = df[col].dt.to_period('Q').astype(str)
-                elif time_granularity == "週 (Week)": df[time_col_name] = df[col].dt.strftime('%Y-W%U')
-                elif time_granularity == "日 (Day)": df[time_col_name] = df[col].dt.strftime('%Y-%m-%d')
+                if time_granularity == "年": df[time_col_name] = df[col].dt.strftime('%Y')
+                elif time_granularity == "季": df[time_col_name] = df[col].dt.to_period('Q').astype(str)
+                elif time_granularity == "週": df[time_col_name] = df[col].dt.strftime('%Y-W%U')
+                elif time_granularity == "日": df[time_col_name] = df[col].dt.strftime('%Y-%m-%d')
                 else: df[time_col_name] = df[col].dt.strftime('%Y-%m')
 
         num_cols = df.select_dtypes(include=['number']).columns.tolist()
@@ -296,18 +303,22 @@ if uploaded_files:
         agg_funcs_list = ["總和 (Sum)", "平均 (Avg)", "最大值 (Max)", "最小值 (Min)", "計數 (Count)"]
         sort_orders_list = ["預設 (依 X 軸)", "數值由大到小 (Desc)", "數值由小到大 (Asc)"]
 
+        # === AI 分析建議區 ===
         st.markdown("---")
-        st.subheader("🤖 Gemini 智慧分析建議 (AI Insights)")
+        st.subheader("🤖 Gemini 智慧分析建議 (20+ Insights)")
         
-        if not st.session_state['gemini_api_key']:
-            st.warning("⚠️ 請在左側側邊欄輸入 **Gemini API Key**，AI 才能開始為您分析數據。")
-        else:
+        if st.session_state['gemini_api_key']:
+            # 這裡使用簡單的邏輯：只要換檔案或剛輸入Key，就重新分析
+            # 為了避免重複觸發，檢查 session state
+            should_analyze = False
             if 'last_analyzed_file' not in st.session_state or st.session_state['last_analyzed_file'] != selected_file_name:
-                with st.spinner("🤖 Gemini 正在讀取數據並思考圖表策略... (約需 3-5 秒)"):
+                should_analyze = True
+            
+            if should_analyze:
+                with st.spinner("🤖 AI 正在腦力激盪，生成 20 個分析視角... (約需 10 秒)"):
                     insights, error_msg = analyze_with_gemini(df, st.session_state['gemini_api_key'])
                     if error_msg:
                         st.error(error_msg)
-                        st.session_state['ai_insights'] = None
                     else:
                         st.session_state['ai_insights'] = insights
                         st.session_state['last_analyzed_file'] = selected_file_name
@@ -317,9 +328,9 @@ if uploaded_files:
                 groups = sorted(list(set(ins['group'] for ins in insights)))
                 
                 for group_name in groups:
-                    group_insights = [ins for ins in insights if ins['group'] == group_name]
                     st.markdown(f"<div class='group-header'>{group_name}</div>", unsafe_allow_html=True)
                     cols = st.columns(3)
+                    group_insights = [ins for ins in insights if ins['group'] == group_name]
                     for i, insight in enumerate(group_insights):
                         with cols[i % 3]:
                             if st.button(insight['title'], key=f"btn_{group_name}_{i}"):
@@ -346,6 +357,12 @@ if uploaded_files:
 
                                 sync_box('x_col_idx', 'x_col_box', all_cols, insight.get('x_col'))
                                 sync_box('y_col_idx', 'y_col_box', num_cols, insight.get('y_col'))
+                                
+                                # 雙軸圖防呆: 只有當 AI 真的給了不同的 y_col_2 時才設定，否則預設跟 y_col 一樣(然後被下面邏輯過濾)
+                                # 這裡簡化處理：如果 AI 沒給 y_col_2 參數(通常沒有)，我們就讓 UI 保持現狀或預設
+                                # 若要更聰明，可以在 Prompt 要求回傳 y_col_2，但目前 V35.1 邏輯已足夠處理單一 Metrics
+                                sync_box('y_col_2_idx', 'y_col_2_box', num_cols, insight.get('y_col')) 
+                                
                                 sync_box('color_col_idx', 'color_col_box', ["(無)"]+all_cols, insight.get('color_col'))
                                 
                                 if c_type == "樹狀圖 (TreeMap)" and insight.get('x_col'):
@@ -353,8 +370,10 @@ if uploaded_files:
                                     st.session_state['treemap_box'] = [insight.get('x_col')]
 
                                 st.rerun()
+        else:
+            st.warning("請輸入 API Key 以啟用智慧分析。")
 
-        # === 側邊欄與繪圖設定 (維持 V32 版邏輯) ===
+        # === 側邊欄與繪圖設定 (維持 V35.1 修復版) ===
         with st.sidebar:
             st.markdown("---")
             st.header("2. 繪圖設定")
@@ -503,11 +522,18 @@ if uploaded_files:
                 if chart_type == "雙軸組合圖 (Combo)":
                     grp_cols = [x_col]
                     if color_col != "(無)" and color_col in df.columns: grp_cols.append(color_col)
-                    df_agg = df.groupby(grp_cols, as_index=False)[[y_col, y_col_2]].agg(agg_func)
+                    
+                    # 雙軸防呆邏輯
+                    metrics = [y_col]
+                    if y_col_2 != y_col: metrics.append(y_col_2)
+                        
+                    df_agg = df.groupby(grp_cols, as_index=False)[metrics].agg(agg_func)
+                    
                     if sort_order == "數值由大到小 (Desc)": df_agg = df_agg.sort_values(by=y_col, ascending=False)
                     elif sort_order == "數值由小到大 (Asc)": df_agg = df_agg.sort_values(by=y_col, ascending=True)
 
                     fig = make_subplots(specs=[[{"secondary_y": True}]])
+                    
                     if color_col != "(無)" and color_col in df.columns and "長條圖" in type_L:
                         for c in df_agg[color_col].unique():
                             subset = df_agg[df_agg[color_col] == c]
@@ -515,8 +541,11 @@ if uploaded_files:
                     else:
                         trace_L = create_trace(df_agg, x_col, y_col, type_L, "左軸", '#636EFA', show_label, text_format, marker_size, 0.7)
                         fig.add_trace(trace_L, secondary_y=False)
-                    trace_R = create_trace(df_agg, x_col, y_col_2, type_R, "右軸", '#EF553B', show_label, text_format, marker_size, 0.9)
-                    fig.add_trace(trace_R, secondary_y=True)
+                    
+                    if y_col_2 in df_agg.columns:
+                        trace_R = create_trace(df_agg, x_col, y_col_2, type_R, "右軸", '#EF553B', show_label, text_format, marker_size, 0.9)
+                        fig.add_trace(trace_R, secondary_y=True)
+                        
                     fig.update_layout(title=f"自由雙軸分析: {y_col} vs {y_col_2}")
 
                 elif chart_type in ["長條圖 (Bar)", "折線圖 (Line)", "面積圖 (Area)", "漏斗圖 (Funnel)", "雷達圖 (Radar)"]:
