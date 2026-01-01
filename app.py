@@ -34,7 +34,7 @@ for key, value in default_states.items():
 # ==========================================
 # 1. 全域設定與 CSS
 # ==========================================
-st.set_page_config(page_title="作圖小工具 V33 (Gemini AI版)", layout="wide", page_icon="✨")
+st.set_page_config(page_title="作圖小工具 V33.1 (Gemini穩定版)", layout="wide", page_icon="✨")
 
 def inject_custom_css(font_family):
     st.markdown(f"""
@@ -82,7 +82,9 @@ def analyze_with_gemini(df, api_key):
     try:
         # 1. 設定 API
         genai.configure(api_key=api_key)
-        model = genai.GenerativeModel('gemini-1.5-flash')
+        
+        # 【修正點】改用最穩定的 gemini-pro 模型，避免 404 錯誤
+        model = genai.GenerativeModel('gemini-pro')
 
         # 2. 準備資料摘要 (只傳送標題與前 5 筆資料，保護隱私並節省 Token)
         data_preview = df.head(5).to_markdown(index=False)
@@ -99,7 +101,7 @@ def analyze_with_gemini(df, api_key):
         {columns_info}
         
         請提供 6 到 9 個「最有商業分析價值」的圖表建議。
-        請務必回傳 **純 JSON 格式** (不要有 markdown 標記)，格式如下：
+        請務必回傳 **純 JSON 格式** (不要有 markdown 標記)，不要包含 ```json ... ```，直接回傳 JSON 陣列。格式如下：
         [
             {{
                 "group": "群組名稱 (例如: 📈 趨勢分析, 🏆 銷售排行, 🍰 結構佔比, 📊 交叉分析)",
@@ -126,6 +128,8 @@ def analyze_with_gemini(df, api_key):
         # 移除可能存在的 markdown code block 符號
         if json_str.startswith("```json"):
             json_str = json_str[7:]
+        if json_str.startswith("```"): # 有些模型只回傳 ```
+            json_str = json_str[3:]
         if json_str.endswith("```"):
             json_str = json_str[:-3]
             
