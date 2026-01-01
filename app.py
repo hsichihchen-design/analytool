@@ -30,9 +30,9 @@ for key, value in default_states.items():
         st.session_state[key] = value
 
 # ==========================================
-# 1. 全域設定與 CSS
+# 1. 全域設定與 CSS (針對間距進行優化)
 # ==========================================
-st.set_page_config(page_title="作圖小工具 V31", layout="wide", page_icon="📊")
+st.set_page_config(page_title="作圖小工具 V32.1", layout="wide", page_icon="📊")
 
 def inject_custom_css(font_family):
     st.markdown(f"""
@@ -41,54 +41,60 @@ def inject_custom_css(font_family):
             font-family: '{font_family}', 'Microsoft JhengHei', sans-serif !important;
         }}
         .stDownloadButton button {{ width: 100%; border-color: #4CAF50; color: #4CAF50; }}
-        /* 智慧建議按鈕樣式 */
+        
+        /* 智慧建議按鈕樣式 (更緊湊) */
         div.stButton > button {{
-            width: 100%; min-height: 60px; height: auto; white-space: normal; word-wrap: break-word;
-            padding: 10px 15px; line-height: 1.5; border-radius: 8px; border: 1px solid #e0e0e0;
+            width: 100%; min-height: 50px; height: auto; white-space: normal; word-wrap: break-word;
+            padding: 8px 12px; line-height: 1.3; border-radius: 6px; border: 1px solid #e0e0e0;
             background-color: #ffffff; text-align: left; display: flex; align-items: center;
+            font-size: 0.95rem;
         }}
         div.stButton > button:hover {{
             border-color: #FF4B4B; color: #FF4B4B; background-color: #fffbfb;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.1); transform: translateY(-2px);
+            box-shadow: 0 2px 4px rgba(0,0,0,0.05); transform: translateY(-1px);
+        }}
+        
+        /* 縮減標題與分隔線的間距 */
+        h3 {{ margin-bottom: 0.5rem !important; padding-bottom: 0 !important; }}
+        p {{ margin-bottom: 0.5rem !important; }}
+        hr {{ margin: 0.5rem 0 1rem 0 !important; }}
+        
+        /* 群組標題樣式 */
+        .group-header {{
+            font-weight: 600;
+            font-size: 1rem;
+            color: #555;
+            margin-top: 10px;
+            margin-bottom: 5px;
+            display: flex;
+            align-items: center;
         }}
     </style>
     """, unsafe_allow_html=True)
 
 # ==========================================
-# 2. 核心功能：具備語意理解的計分引擎 (Smart Scoring Engine)
+# 2. 核心功能：具備語意理解的計分引擎
 # ==========================================
 
 def get_column_score(col_name, data_series, role):
-    """
-    根據欄位名稱與資料特性，計算該欄位適合某個角色(Role)的分數。
-    Role: 'metric' (數值), 'dimension' (分類), 'date' (日期)
-    """
     score = 0
     col_str = str(col_name).lower()
     
-    # === A. 關鍵字加權 (Keyword Heuristics) ===
     keywords = {
         'metric': ['amount', 'sales', 'profit', 'cost', 'price', 'qty', 'quantity', 'revenue', 'margin', 'score', 
-                   '金額', '銷售', '營收', '利潤', '毛利', '成本', '數量', '單價', '分數', '人次'],
+                   '金額', '銷售', '營收', '利潤', '毛利', '成本', '數量', '單價', '分數', '人次', '庫存'],
         'dimension': ['region', 'city', 'country', 'category', 'type', 'status', 'segment', 'brand', 'source', 'manager', 'rep',
-                      '地區', '城市', '國家', '類別', '型態', '狀態', '分群', '品牌', '來源', '業務', '經理', '部門'],
+                      '地區', '城市', '國家', '類別', '型態', '狀態', '分群', '品牌', '來源', '業務', '經理', '部門', '廠區'],
         'date': ['date', 'time', 'year', 'month', 'day', 'quarter', 'week', 
                  '日期', '時間', '年', '月', '日', '季', '週']
     }
     
-    id_keywords = ['id', 'no', 'code', 'phone', 'zip', 'lat', 'lon', 'year', 'month', 'day', # year有時不適合作為加總數值
-                   '編號', '代碼', '電話', '郵遞', '經度', '緯度']
+    id_keywords = ['id', 'no', 'code', 'phone', 'zip', 'lat', 'lon', 'year', 'month', 'day', '編號', '代碼', '電話', '郵遞']
 
-    if any(k in col_str for k in keywords[role]):
-        score += 10 
-    
-    if role == 'metric':
-        if any(k in col_str for k in id_keywords):
-            score -= 20 
+    if any(k in col_str for k in keywords[role]): score += 10 
+    if role == 'metric' and any(k in col_str for k in id_keywords): score -= 20 
 
-    # === B. 統計特徵加權 (Statistical Heuristics) ===
     n_unique = data_series.nunique()
-    
     if role == 'dimension':
         if 1 < n_unique < 50: score += 5 
         if n_unique > 100: score -= 10   
@@ -98,30 +104,23 @@ def get_column_score(col_name, data_series, role):
     if role == 'metric':
         if pd.api.types.is_numeric_dtype(data_series):
             score += 5
-            # 排除看起來像年份的數字
-            if data_series.mean() > 1900 and data_series.mean() < 2100 and data_series.std() < 5:
-                score -= 10 
-        else:
-            score -= 100 
+            if data_series.mean() > 1900 and data_series.mean() < 2100 and data_series.std() < 5: score -= 10 
+        else: score -= 100 
 
     return score
 
 def generate_insights_advanced(df):
     insights = []
     
-    # 1. 智慧盤點欄位 (Smart Column Picking)
     all_num_cols = df.select_dtypes(include=['number']).columns.tolist()
     all_cat_cols = df.select_dtypes(exclude=['number', 'datetime']).columns.tolist()
     
-    # --- 找出最佳日期欄位 ---
-    time_cols = [c for c in df.columns if '(時間)' in c] # 優先用系統生成的粒度欄位
-    if time_cols:
-        best_date_col = time_cols[0] 
+    time_cols = [c for c in df.columns if '(時間)' in c]
+    if time_cols: best_date_col = time_cols[0] 
     else:
         raw_date_cols = [c for c in df.columns if pd.api.types.is_datetime64_any_dtype(df[c])]
         best_date_col = raw_date_cols[0] if raw_date_cols else None
 
-    # --- 找出最佳數值欄位 (Top 3 Metrics) ---
     metric_scores = []
     for col in all_num_cols:
         s = get_column_score(col, df[col], 'metric')
@@ -129,7 +128,6 @@ def generate_insights_advanced(df):
     metric_scores.sort(key=lambda x: x[1], reverse=True)
     top_metrics = [m[0] for m in metric_scores if m[1] > 0][:3]
     
-    # --- 找出最佳分類欄位 (Top 3 Dimensions) ---
     dim_scores = []
     for col in all_cat_cols:
         s = get_column_score(col, df[col], 'dimension')
@@ -143,9 +141,7 @@ def generate_insights_advanced(df):
                    "散佈圖 (Scatter)", "箱型圖 (Box Plot)", "面積圖 (Area)", "直方圖 (Histogram)", "雷達圖 (Radar)"]
     sort_orders = ["預設 (依 X 軸)", "數值由大到小 (Desc)", "數值由小到大 (Asc)"]
 
-    # === 生成建議策略 (Strategies) ===
-
-    # 策略 A: 趨勢 (Trend)
+    # 策略 A: 趨勢
     if best_date_col:
         for num in top_metrics[:2]:
             insights.append({
@@ -154,7 +150,7 @@ def generate_insights_advanced(df):
                 "params": {"chart_type_idx": chart_types.index("折線圖 (Line)"), "x_col_name": best_date_col, "y_col_name": num, "agg_func_idx": 0, "sort_order_idx": 0}
             })
 
-    # 策略 B: 排行 (Ranking)
+    # 策略 B: 排行
     for cat in top_dims[:2]: 
         num = top_metrics[0]
         insights.append({
@@ -163,7 +159,7 @@ def generate_insights_advanced(df):
             "params": {"chart_type_idx": chart_types.index("長條圖 (Bar)"), "x_col_name": cat, "y_col_name": num, "agg_func_idx": 0, "sort_order_idx": sort_orders.index("數值由大到小 (Desc)")}
         })
 
-    # 策略 C: 交叉 (Cross)
+    # 策略 C: 交叉
     if len(top_dims) >= 2:
         c1, c2 = top_dims[0], top_dims[1]
         num = top_metrics[0]
@@ -173,7 +169,7 @@ def generate_insights_advanced(df):
             "params": {"chart_type_idx": chart_types.index("長條圖 (Bar)"), "x_col_name": c1, "y_col_name": num, "color_col_name": c2, "agg_func_idx": 0, "sort_order_idx": sort_orders.index("數值由大到小 (Desc)")}
         })
 
-    # 策略 D: 結構 (Composition)
+    # 策略 D: 結構
     for cat in top_dims:
         n = df[cat].nunique()
         num = top_metrics[0]
@@ -191,7 +187,7 @@ def generate_insights_advanced(df):
             })
              break 
 
-    # 策略 E: 關聯 (Correlation)
+    # 策略 E: 關聯
     if len(top_metrics) >= 2:
         n1, n2 = top_metrics[0], top_metrics[1]
         insights.append({
@@ -203,49 +199,79 @@ def generate_insights_advanced(df):
     return insights
 
 # ==========================================
-# 3. 資料生成與說明書 (V31版)
+# 3. 詳細版說明書 (Detailed Manual)
 # ==========================================
 def get_manual_content():
     return """
-# 📊 作圖小工具 (V31) 使用手冊
+# 📊 作圖小工具 (BI Tool) 使用手冊
 
-## 1. 📂 資料準備 (關鍵第一步)
-本工具內建「語意分析 AI」，為了讓它精準判讀，請準備 **「一維明細表 (流水帳)」**。
+歡迎使用！本工具專為快速生成商業分析圖表設計。
+無需寫程式，只需準備好 Excel，透過「智慧建議」或「手動設定」即可產出專業圖表。
 
-### ✅ 正確格式範例
-每一列 (Row) 是一筆獨立紀錄，第一列是標題。
+---
+
+## 1. 📂 準備資料 (最重要！)
+為了讓系統能自動分析，請確保您的資料符合 **「一維明細表 (流水帳)」** 格式。
+
+### ✅ 正確格式範例 (請準備這種)
+每一列 (Row) 代表一筆獨立的交易或紀錄，第一列必須是標題。
 | 訂單日期 | 地區 | 產品名稱 | 銷售金額 | 利潤 |
 | :--- | :--- | :--- | :--- | :--- |
-| 2024-01-01 | 台北 | 智慧手機 | 25000 | 5000 |
-| 2024-01-02 | 台中 | 無線耳機 | 3000 | 800 |
+| 2024-01-01 | 台北 | 手機 | 25000 | 5000 |
+| 2024-01-02 | 台中 | 耳機 | 3000 | 800 |
 
-### ❌ 常見錯誤 (請避免)
-1. **統計報表**：不要上傳已經算好「1月總計、2月總計」的表格。
-2. **合併儲存格**：請取消所有合併，確保程式能讀取每一格。
-3. **特殊符號**：金額欄位請用純數字 (如 `1000`)，不要包含 `$`、`NTD` 或 `元`。
+### ❌ 錯誤格式範例 (請勿上傳)
+電腦看不懂「已經統計好」或「二維交叉」的報表。
+| 產品 | 1月總計 | 2月總計 | (錯誤：日期變成欄位了) |
+| :--- | :--- | :--- | :--- |
+| 手機 | 50000 | 60000 | |
 
-## 2. 🤖 智慧分析操作 (Strategic Insights)
-上傳檔案後，系統會自動執行以下動作：
-1. **語意偵測**：自動尋找關鍵字 (如：Sales, Amount, Date, Region...)。
-2. **生成建議**：在主畫面產生分類好的分析按鈕：
-   - 📈 **趨勢 (Trend)**：自動繪製時間走勢圖。
-   - 🏆 **排行 (Ranking)**：自動列出前幾名的分類排行。
-   - 📊 **交叉 (Cross)**：分析兩個維度 (如地區 vs 產品) 的分佈。
-   - 🔗 **關聯 (Correlation)**：若有多個數值，自動分析相關性。
-3. **一鍵生成**：點擊按鈕，圖表與左側設定會自動跳轉到位！
+**⚠️ 資料清理小撇步：**
+1. **移除標題**：請刪除表格上方多餘的大標題 (如 "2024財務報表")，讓 **A1 儲存格** 直接是欄位名稱。
+2. **取消合併**：請檢查並取消所有「合併儲存格」。
+3. **純數字**：金額欄位請保持純數字 (如 `1000`)，不要包含 `$` 或 `元` 等文字。
 
-## 3. 🛠️ 手動微調與進階設定
-您依然可以在左側側邊欄進行細微調整：
-- **⏳ 時間粒度**：若有日期欄位，可一鍵切換 年/季/月/週/日 視角。
-- **📊 圖表類型**：支援 雙軸圖 (Combo)、樹狀圖 (TreeMap)、雷達圖等 11 種圖表。
-- **🔢 美化設定**：
-  - **排序**：設定「數值由大到小」讓長條圖更整齊。
-  - **目標線**：輸入 KPI 數字，圖表會顯示紅色虛線。
-  - **數值標籤**：可設定顯示位數與位置 (如置中、上方)。
+---
 
-## 4. 💾 輸出成果
-- **📷 下載圖片**：滑鼠移至圖表右上角的相機圖示，下載 4K 高畫質 PNG。
-- **📥 下載 HTML**：點擊下方綠色按鈕，下載可互動的網頁檔。
+## 2. 🤖 智慧分析建議 (Strategic Insights)
+上傳檔案後，畫面上方會出現 **「戰略分析建議」** 區塊。這是系統根據您的欄位名稱 (如 Sales, Date, Region) 自動運算的結果。
+
+* **📈 趨勢分析 (Trend)**：自動抓取日期欄位，繪製折線圖，觀察隨時間的變化。
+* **🏆 重點排行 (Ranking)**：自動抓取分類欄位，繪製長條圖並**由大到小排序**，找出表現最好的前幾名。
+* **📊 交叉分析 (Cross)**：當資料有多個分類時 (如 地區 + 產品)，自動生成堆疊長條圖。
+* **🍰 結構佔比 (Share)**：自動生成圓餅圖或樹狀圖，分析各項目的佔比。
+
+💡 **操作技巧**：
+點擊任一建議按鈕，**左側的設定欄位會自動同步跳轉**！
+您可以先點擊按鈕生成雛形，再到左側微調顏色或圖表類型。
+
+---
+
+## 3. 🛠️ 左側手動設定
+您可以在側邊欄進行更細緻的調整：
+
+* **1. 資料來源**：
+    * **時間粒度**：若有日期欄位，可一鍵切換 **年 / 季 / 月 / 週**，系統會自動重新加總數據。
+* **2. 繪圖設定**：
+    * **圖表類型**：支援 雙軸圖 (Combo)、雷達圖、箱型圖等 11 種圖表。
+    * **雙軸組合圖**：可設定左軸為長條 (如營收)，右軸為折線 (如毛利率)。
+    * **顏色分組**：將長條圖依據某個欄位進行顏色區分 (堆疊)。
+* **3. 外觀與細節**：
+    * **排序方式**：建議選「數值由大到小」，讓長條圖更整齊易讀。
+    * **參考線 (Target)**：輸入目標金額，圖上會出現紅色虛線，方便檢視達標狀況。
+    * **X 軸縮放**：可手動輸入日期區間，只看特定時間段的資料。
+
+---
+
+## 4. 💾 下載與分享
+完成圖表後，有兩種方式匯出：
+
+1.  **📷 下載 4K 圖片**：
+    滑鼠移到圖表右上角，點擊 **相機圖示 (Download plot as a png)**。
+    * 優點：高解析度，適合放入 PPT 或 Word 報告。
+2.  **📥 下載互動式 HTML**：
+    點擊畫面下方的綠色按鈕。
+    * 優點：這是一個網頁檔，可以用 Email 寄給同事。對方打開後，滑鼠游標移上去可以看到詳細數字，也可以縮放圖表，完全保留互動性！
 
 祝您分析順利！
     """
@@ -344,51 +370,80 @@ if uploaded_files:
         num_cols = df.select_dtypes(include=['number']).columns.tolist()
         cat_cols = df.select_dtypes(exclude=['number', 'datetime']).columns.tolist()
         all_cols = df.columns.tolist()
+        
+        # 定義選單內容 (為了同步 Side bar，必須移到這裡定義)
+        chart_types_list = ["長條圖 (Bar)", "折線圖 (Line)", "雙軸組合圖 (Combo)", "圓餅圖 (Pie)", "樹狀圖 (TreeMap)", "散佈圖 (Scatter)", "箱型圖 (Box Plot)", "面積圖 (Area)", "直方圖 (Histogram)", "雷達圖 (Radar)", "漏斗圖 (Funnel)"]
+        agg_funcs_list = ["總和 (Sum)", "平均 (Avg)", "最大值 (Max)", "最小值 (Min)", "計數 (Count)"]
+        sort_orders_list = ["預設 (依 X 軸)", "數值由大到小 (Desc)", "數值由小到大 (Asc)"]
 
-        # === 戰略分析建議區 ===
+        # === 戰略分析建議區 (優化版) ===
         st.markdown("---")
         st.subheader("💡 戰略分析建議 (Strategic Insights)")
         
         insights = generate_insights_advanced(df)
         
         if not insights:
-            st.info("⚠️ 偵測不到足夠的關鍵欄位。請確認資料是否有「數值欄」(如金額) 與「分類欄」(如地區)。")
+            st.info("⚠️ 偵測不到足夠的關鍵欄位。")
         else:
             groups = sorted(list(set(ins['group'] for ins in insights)))
             for group_name in groups:
                 group_insights = [ins for ins in insights if ins['group'] == group_name]
-                st.markdown(f"**{group_name}**")
+                st.markdown(f"<div class='group-header'>{group_name}</div>", unsafe_allow_html=True) # 使用緊湊的 HTML 標題
                 cols = st.columns(3)
                 for i, insight in enumerate(group_insights):
                     with cols[i % 3]:
                         if st.button(insight['title'], key=f"btn_{group_name}_{i}"):
                             params = insight["params"]
+                            # 1. 更新索引 State
                             st.session_state['chart_type_idx'] = params["chart_type_idx"]
                             st.session_state['agg_func_idx'] = params["agg_func_idx"]
                             st.session_state['sort_order_idx'] = params["sort_order_idx"]
                             
-                            def get_idx(lst, name): 
-                                try: return lst.index(name)
-                                except: return 0
+                            # 2. 強制同步 Widget Key (關鍵修正！讓側邊欄立刻變動)
+                            st.session_state['chart_type_box'] = chart_types_list[params["chart_type_idx"]]
+                            st.session_state['agg_func_box'] = agg_funcs_list[params["agg_func_idx"]]
+                            st.session_state['sort_order_box'] = sort_orders_list[params["sort_order_idx"]]
+
+                            def get_idx_and_val(lst, name): 
+                                try: 
+                                    idx = lst.index(name)
+                                    return idx, name
+                                except: return 0, lst[0] if lst else None
                             
-                            if "x_col_name" in params: st.session_state['x_col_idx'] = get_idx(all_cols, params["x_col_name"])
-                            if "y_col_name" in params: st.session_state['y_col_idx'] = get_idx(num_cols, params["y_col_name"])
-                            if "color_col_name" in params: st.session_state['color_col_idx'] = get_idx(["(無)"]+all_cols, params["color_col_name"])
-                            else: st.session_state['color_col_idx'] = 0
-                            if "treemap_path" in params: st.session_state['treemap_path'] = params["treemap_path"]
+                            if "x_col_name" in params: 
+                                idx, val = get_idx_and_val(all_cols, params["x_col_name"])
+                                st.session_state['x_col_idx'] = idx
+                                st.session_state['x_col_box'] = val
+                                
+                            if "y_col_name" in params: 
+                                idx, val = get_idx_and_val(num_cols, params["y_col_name"])
+                                st.session_state['y_col_idx'] = idx
+                                st.session_state['y_col_box'] = val
+                                
+                            if "color_col_name" in params: 
+                                idx, val = get_idx_and_val(["(無)"]+all_cols, params["color_col_name"])
+                                st.session_state['color_col_idx'] = idx
+                                st.session_state['color_col_box'] = val
+                            else: 
+                                st.session_state['color_col_idx'] = 0
+                                st.session_state['color_col_box'] = "(無)"
+
+                            if "treemap_path" in params: 
+                                st.session_state['treemap_path'] = params["treemap_path"]
+                                # multiselect 比較特殊，直接更新 key
+                                st.session_state['treemap_box'] = params["treemap_path"] 
                             
                             st.rerun()
-                st.markdown("---")
+                # 這裡不加 st.markdown("---")，改用 CSS 控制間距
 
         # === 側邊欄與繪圖設定 ===
         with st.sidebar:
             st.markdown("---")
             st.header("2. 繪圖設定")
-            chart_types_list = ["長條圖 (Bar)", "折線圖 (Line)", "雙軸組合圖 (Combo)", "圓餅圖 (Pie)", "樹狀圖 (TreeMap)", "散佈圖 (Scatter)", "箱型圖 (Box Plot)", "面積圖 (Area)", "直方圖 (Histogram)", "雷達圖 (Radar)", "漏斗圖 (Funnel)"]
-            agg_funcs_list = ["總和 (Sum)", "平均 (Avg)", "最大值 (Max)", "最小值 (Min)", "計數 (Count)"]
-            sort_orders_list = ["預設 (依 X 軸)", "數值由大到小 (Desc)", "數值由小到大 (Asc)"]
             
+            # 使用 Session State 的 Index 與 Key 來保持同步
             chart_type = st.selectbox("圖表類型", chart_types_list, index=st.session_state['chart_type_idx'], key='chart_type_box')
+            
             x_col, y_col, y_col_2, color_col, facet_col = None, None, None, None, None
             agg_func = "sum"
             marker_symbol = "circle"
