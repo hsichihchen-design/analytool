@@ -34,7 +34,7 @@ for key, value in default_states.items():
 # ==========================================
 # 1. 全域設定與 CSS
 # ==========================================
-st.set_page_config(page_title="作圖小工具 V34 (AI強韌版)", layout="wide", page_icon="✨")
+st.set_page_config(page_title="作圖小工具 V35 (AI驗證版)", layout="wide", page_icon="✨")
 
 def inject_custom_css(font_family):
     st.markdown(f"""
@@ -67,20 +67,39 @@ def inject_custom_css(font_family):
     """, unsafe_allow_html=True)
 
 # ==========================================
-# 2. 核心功能：Gemini AI 分析引擎 (自動切換模型版)
+# 2. 核心功能：Gemini AI 分析引擎 (含動態搜尋)
 # ==========================================
 
+def get_valid_model():
+    """
+    動態詢問 Google 有哪些模型可用，避免 404 錯誤。
+    """
+    try:
+        # 列出所有模型
+        models = [m for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
+        
+        # 優先尋找 Flash (快) -> Pro (穩)
+        for m in models:
+            if 'flash' in m.name: return m.name
+        for m in models:
+            if 'pro' in m.name: return m.name
+            
+        # 如果都沒找到，回傳預設
+        return 'gemini-pro'
+    except:
+        return 'gemini-pro' # 發生錯誤時的保底
+
 def analyze_with_gemini(df, api_key):
-    """
-    呼叫 Gemini API，具備模型自動 fallback 機制。
-    """
     if not api_key:
-        return None, "請先在側邊欄輸入 Gemini API Key 才能啟動 AI 分析。"
+        return None, "請先輸入 API Key。"
 
     try:
         genai.configure(api_key=api_key)
         
-        # 準備資料摘要
+        # === 核心修正：動態取得可用模型 ===
+        model_name = get_valid_model()
+        model = genai.GenerativeModel(model_name)
+
         data_preview = df.head(5).to_markdown(index=False)
         columns_info = str(df.dtypes.to_dict())
 
@@ -113,27 +132,8 @@ def analyze_with_gemini(df, api_key):
         "散佈圖 (Scatter)", "箱型圖 (Box Plot)", "面積圖 (Area)", "直方圖 (Histogram)", "雷達圖 (Radar)"
         """
 
-        # === 核心修正：多模型嘗試機制 ===
-        # 優先嘗試 1.5 Flash (最快)，如果報錯 (404/500)，則嘗試 Pro
-        models_to_try = ['gemini-1.5-flash', 'gemini-pro']
-        response = None
-        last_error = None
-
-        for model_name in models_to_try:
-            try:
-                # 嘗試建立模型並生成
-                model = genai.GenerativeModel(model_name)
-                response = model.generate_content(prompt)
-                break # 如果成功，跳出迴圈
-            except Exception as e:
-                last_error = e
-                print(f"Model {model_name} failed, trying next...")
-                continue # 失敗則嘗試下一個
-
-        if not response:
-            return None, f"AI 連線失敗，請檢查 API Key 是否正確，或稍後再試。(錯誤代碼: {str(last_error)})"
+        response = model.generate_content(prompt)
         
-        # 清理與解析 JSON
         json_str = response.text.strip()
         if json_str.startswith("```json"): json_str = json_str[7:]
         if json_str.startswith("```"): json_str = json_str[3:]
@@ -143,50 +143,32 @@ def analyze_with_gemini(df, api_key):
         return insights, None
 
     except Exception as e:
-        return None, f"AI 分析發生未預期錯誤: {str(e)}"
+        return None, f"AI 分析失敗 (使用模型: {model_name}): {str(e)}"
 
 # ==========================================
 # 3. 詳細版使用說明書
 # ==========================================
 def get_manual_content():
     return """
-# 📊 作圖小工具 (V34 AI版) 使用手冊
-
-本工具整合了 Google Gemini AI 模型，能像真人分析師一樣，自動讀懂您的資料並建議圖表。
-
----
+# 📊 作圖小工具 (V35 AI版) 使用手冊
 
 ## 1. 🔑 啟動 AI (必要步驟)
-由於本工具使用進階 AI 分析，您需要一組 Google Gemini API Key。
-1. **申請 Key**：前往 Google AI Studio (aistudio.google.com) 免費申請。
-2. **輸入 Key**：將申請到的 Key 貼入本工具左側側邊欄的「🔑 Gemini API Key」欄位。
-   * *安心聲明：您的 Key 僅用於本次連線，不會被我們儲存。*
+1. **申請 Key**：前往 [Google AI Studio](https://aistudio.google.com/app/apikey) 免費申請。
+2. **輸入 Key**：貼入左側側邊欄的「🔑 Gemini API Key」。
+3. **點擊驗證**：按下「✅ 驗證 Key」按鈕，確認連線成功。
 
 ## 2. 📂 資料準備
-雖然 AI 很聰明，但良好的資料格式能讓分析更精準：
-* **格式**：請準備 **「一維明細表 (流水帳)」**。
-* **範例**：
-    | 日期 | 產品 | 地區 | 金額 |
-    | :--- | :--- | :--- | :--- |
-    | 1/1  | 手機 | 台北 | 2000 |
-    | 1/2  | 電腦 | 台中 | 5000 |
-* **避免**：不要上傳樞紐分析表 (Pivot Table) 或有合併儲存格的報表。
+請準備 **「一維明細表 (流水帳)」**。
+範例：
+| 日期 | 產品 | 金額 |
+| :--- | :--- | :--- |
+| 1/1  | A    | 100  |
 
-## 3. 🤖 智慧分析操作
-當您上傳檔案並輸入 Key 後，系統會自動運作：
-1. **AI 讀取**：AI 會讀取您的欄位名稱與前 5 筆資料 (不會上傳全部資料，確保隱私)。
-2. **生成策略**：畫面上方會出現 AI 推薦的按鈕，如「📈 業績趨勢」、「🏆 產品排行」。
-3. **一鍵作圖**：點擊按鈕，下方的圖表與左側設定會 **自動同步**。
+## 3. 🤖 智慧分析
+上傳檔案後，AI 會自動讀取前 5 筆資料並生成建議。點擊按鈕即可一鍵作圖。
 
 ## 4. 🛠️ 手動微調
-AI 生成圖表後，您依然擁有 100% 的控制權：
-* **換圖表**：在左側將「長條圖」換成「圓餅圖」。
-* **換顏色**：指定「顏色分組」欄位來堆疊圖表。
-* **加參考線**：輸入目標金額，查看達標狀況。
-
-## 5. 💾 下載成果
-* **下載圖片**：點擊圖表右上角的相機圖示 (4K PNG)。
-* **下載網頁**：點擊下方的綠色按鈕，將互動圖表存成 HTML 檔寄給同事。
+AI 生成後，您可於左側自由調整圖表類型、顏色與排序。
 
 祝您分析愉快！
     """
@@ -246,7 +228,25 @@ st.title("✨ 作圖小工具 (Gemini AI版)")
 with st.sidebar:
     st.header("1. 資料來源")
     
+    # === API Key 輸入與驗證區 ===
     st.session_state['gemini_api_key'] = st.text_input("🔑 Gemini API Key", value=st.session_state['gemini_api_key'], type="password", help="請輸入您的 Google Gemini API Key 以啟用智慧分析功能")
+    
+    # 新增：驗證按鈕
+    if st.button("✅ 驗證 API Key", use_container_width=True):
+        if not st.session_state['gemini_api_key']:
+            st.error("請先輸入 Key")
+        else:
+            try:
+                genai.configure(api_key=st.session_state['gemini_api_key'])
+                # 嘗試列出模型來測試連線
+                models = list(genai.list_models())
+                if models:
+                    st.success(f"🎉 連線成功！可用模型數: {len(models)}")
+                else:
+                    st.warning("連線成功但無可用模型，請檢查 Google Cloud 權限。")
+            except Exception as e:
+                st.error(f"❌ 連線失敗: {e}")
+
     if not st.session_state['gemini_api_key']:
         st.caption("👉 [點此申請免費 Key](https://aistudio.google.com/app/apikey)")
     
