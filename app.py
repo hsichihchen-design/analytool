@@ -32,60 +32,53 @@ for key, value in default_states.items():
         st.session_state[key] = value
 
 # ==========================================
-# 1. 全域設定與 CSS (7欄極限版)
+# 1. 全域設定與 CSS (V40 修正版)
 # ==========================================
-st.set_page_config(page_title="作圖小工具 V38 (七欄極限版)", layout="wide", page_icon="✨")
+st.set_page_config(page_title="作圖小工具 V40", layout="wide", page_icon="✨")
 
 def inject_custom_css(font_family):
+    # 字體設定
+    google_font_import = ""
+    font_css_rule = font_family
+    if font_family == "Noto Sans TC (推薦)":
+        google_font_import = "@import url('https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;700&display=swap');"
+        font_css_rule = "'Noto Sans TC', sans-serif"
+    elif "華康" in font_family:
+        font_css_rule = f"'{font_family}', 'Microsoft JhengHei', sans-serif"
+
     st.markdown(f"""
     <style>
+        {google_font_import}
+        
         html, body, [class*="css"] {{
-            font-family: '{font_family}', 'Microsoft JhengHei', sans-serif !important;
+            font-family: {font_css_rule} !important;
         }}
         .stDownloadButton button {{ width: 100%; border-color: #4CAF50; color: #4CAF50; }}
         
-        /* 七欄佈局專用按鈕樣式 */
+        /* 7欄按鈕樣式 */
         div.stButton > button {{
-            width: 100%; 
-            min-height: 45px;  
-            height: 100%;
-            white-space: normal; 
-            word-wrap: break-word;
-            padding: 4px 6px; /* 極小內距 */
-            line-height: 1.2; 
-            border-radius: 4px; 
-            border: 1px solid #ddd;
-            background-color: #ffffff; 
-            text-align: left; 
-            display: flex; 
-            align-items: center;
-            font-size: 0.8rem; /* 字體縮小以適應窄欄寬 */
-            box-shadow: 0 1px 1px rgba(0,0,0,0.05);
+            width: 100%; min-height: 45px; height: 100%; white-space: normal; word-wrap: break-word;
+            padding: 4px 6px; line-height: 1.2; border-radius: 4px; border: 1px solid #ddd;
+            background-color: #ffffff; text-align: left; display: flex; align-items: center;
+            font-size: 0.8rem; box-shadow: 0 1px 1px rgba(0,0,0,0.05);
+            font-family: {font_css_rule} !important;
         }}
         div.stButton > button:hover {{
-            border-color: #7c4dff; 
-            color: #7c4dff; 
-            background-color: #f8f5ff;
-            transform: translateY(-1px);
-            z-index: 1;
+            border-color: #7c4dff; color: #7c4dff; background-color: #f8f5ff;
+            transform: translateY(-1px); z-index: 1;
         }}
         
         .group-header {{
-            font-weight: 700; 
-            font-size: 0.9rem; 
-            color: #666;
-            margin-top: 10px; 
-            margin-bottom: 4px; 
-            padding-bottom: 2px;
+            font-weight: 700; font-size: 0.9rem; color: #666;
+            margin-top: 15px; margin-bottom: 5px; padding-bottom: 2px;
             border-bottom: 1px solid #eee;
+            font-family: {font_css_rule} !important;
         }}
         
-        /* 減少上方留白 */
-        .block-container {{ padding-top: 1rem; }}
+        /* [修正點 1] 增加上方留白，避免標題被切掉 */
+        .block-container {{ padding-top: 3.5rem; }}
         
-        [data-testid="stSidebar"] [data-testid="stTextInput"] input {{
-            border-color: #7c4dff;
-        }}
+        [data-testid="stSidebar"] [data-testid="stTextInput"] input {{ border-color: #7c4dff; }}
     </style>
     """, unsafe_allow_html=True)
 
@@ -94,7 +87,6 @@ def inject_custom_css(font_family):
 # ==========================================
 
 def get_valid_model():
-    """動態取得可用模型，避免 404"""
     try:
         models = [m for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
         for m in models: 
@@ -125,22 +117,23 @@ def analyze_with_gemini(df, api_key):
         columns_summary = json.dumps(stats_info, ensure_ascii=False, indent=2)
         data_preview = df.head(3).to_markdown(index=False)
 
-        # === Prompt：嚴格限制 10 字 ===
+        # [修正點 2] Prompt 新增「義大利麵條圖 (Spaghetti Chart)」禁令
         prompt = f"""
-        你是一位數據分析師。請分析資料，提供 20 個分析圖表建議。
+        你是一位精通資料視覺化的分析師。請分析資料，提供 20 個分析圖表建議。
         
-        【欄位統計 (AI決策依據)】：
+        【欄位統計】：
         {columns_summary}
         
         【數據預覽】：
         {data_preview}
         
-        【規則】：
-        1. **標題限制**：嚴格控制在 **10 個中文字以內** (因為按鈕很窄)。例如「各區營收」優於「各地區銷售總額」。
+        【嚴格規則】：
+        1. **標題限制**：嚴格控制在 **10 個中文字以內**。
         2. **去除贅詞**：不要包含「分析」、「統計」、「圖表」等字。
-        3. **視覺防呆**：
-           - Unique > 20：禁止圓餅圖。
-           - Unique > 50：禁止長條圖 (除非是 Top N)。
+        3. **視覺防呆 (Spaghetti Chart Prevention)**：
+           - **折線圖 (Line)**：如果某個欄位的 Unique Values > 10，**絕對禁止**用該欄位做顏色分組 (`color_col`)，因為線條會太多太亂。改用 `color_col: null` 畫總體趨勢即可。
+           - **圓餅圖 (Pie)**：Unique > 15 禁止。
+           - **長條圖 (Bar)**：Unique > 50 禁止 (除非 Top N)。
         4. **雙軸防呆**：左右軸必須是不同欄位。
         
         請回傳 **純 JSON 格式**：
@@ -179,19 +172,19 @@ def analyze_with_gemini(df, api_key):
 # ==========================================
 def get_manual_content():
     return """
-# 📊 作圖小工具 (V38 七欄極限版) 使用手冊
+# 📊 作圖小工具 (V40 完美防呆版) 使用手冊
 
 ## 1. 🔑 啟動 AI
 1. 前往 Google AI Studio 申請免費 Key。
 2. 貼入左側「🔑 Gemini API Key」欄位並點擊驗證。
 
 ## 2. 🤖 智慧分析
-上傳檔案後，AI 會參考資料統計特徵 (如分類數量)，生成 20 個最合理的圖表建議。
-V38 版採用 7 欄高密度排列，讓您一眼看盡所有重要資訊。
+上傳檔案後，AI 會自動生成 20 個精簡標題建議。
+**新功能**：系統會自動過濾掉「太醜」的圖表 (例如線條太多的折線圖)，強制只顯示前 10 名，確保畫面清爽。
 
-## 3. 🛠️ 操作技巧
-* **點擊即看**：點擊任一按鈕，圖表與設定自動同步。
-* **空間利用**：建議使用電腦版瀏覽器並開啟全螢幕，以獲得最佳體驗。
+## 3. 🛠️ 疑難排解
+* **標題顯示**：已修復標題被切掉的問題。
+* **字體**：建議選擇 "Noto Sans TC" 獲得最佳體驗。
 
 祝您分析愉快！
     """
@@ -264,8 +257,10 @@ with st.sidebar:
             excel_data = generate_demo_excel()
             st.download_button("📊 下載 Excel", excel_data, "Demo_Data.xlsx")
     
-    font_choice = st.selectbox("字體", ["Microsoft JhengHei", "Arial"], index=0)
+    font_options = ["Noto Sans TC (推薦)", "Microsoft JhengHei", "華康粗圓體", "華康儷中黑", "Arial"]
+    font_choice = st.selectbox("字體", font_options, index=0)
     inject_custom_css(font_choice)
+    
     uploaded_files = st.file_uploader("上傳 Excel/CSV", type=["xlsx", "csv"], accept_multiple_files=True)
 
 df = None
@@ -299,7 +294,6 @@ if uploaded_files:
         agg_funcs_list = ["總和 (Sum)", "平均 (Avg)", "最大值 (Max)", "最小值 (Min)", "計數 (Count)"]
         sort_orders_list = ["預設 (依 X 軸)", "數值由大到小 (Desc)", "數值由小到大 (Asc)"]
 
-        # === AI 分析建議區 ===
         st.markdown("---")
         st.subheader("🤖 Gemini 智慧分析建議 (20+ Insights)")
         
@@ -319,13 +313,10 @@ if uploaded_files:
                 
                 for group_name in groups:
                     st.markdown(f"<div class='group-header'>{group_name}</div>", unsafe_allow_html=True)
-                    
-                    # === 核心修改：7 欄佈局 ===
                     cols = st.columns(7) 
-                    
                     group_insights = [ins for ins in insights if ins['group'] == group_name]
                     for i, insight in enumerate(group_insights):
-                        with cols[i % 7]: # 循環放入 7 欄
+                        with cols[i % 7]:
                             if st.button(insight['title'], key=f"btn_{group_name}_{i}"):
                                 c_type = insight.get('chart_type', '長條圖 (Bar)')
                                 if c_type not in chart_types_list: c_type = '長條圖 (Bar)'
@@ -351,7 +342,16 @@ if uploaded_files:
                                 sync_box('x_col_idx', 'x_col_box', all_cols, insight.get('x_col'))
                                 sync_box('y_col_idx', 'y_col_box', num_cols, insight.get('y_col'))
                                 sync_box('y_col_2_idx', 'y_col_2_box', num_cols, insight.get('y_col')) 
-                                sync_box('color_col_idx', 'color_col_box', ["(無)"]+all_cols, insight.get('color_col'))
+                                
+                                # [修正點 3] 顏色分組防呆機制
+                                target_color = insight.get('color_col')
+                                # 如果 AI 建議了顏色，但該欄位 Unique > 10，強制設為 無
+                                if target_color and target_color in df.columns:
+                                    if df[target_color].nunique() > 10 and "折線圖" in c_type:
+                                        target_color = None
+                                        st.toast(f"⚠️ 為了圖表可讀性，已自動隱藏 '{insight.get('color_col')}' 的顏色分組 (太多類別)", icon="🛡️")
+                                
+                                sync_box('color_col_idx', 'color_col_box', ["(無)"]+all_cols, target_color)
                                 
                                 if c_type == "樹狀圖 (TreeMap)" and insight.get('x_col'):
                                     st.session_state['treemap_path'] = [insight.get('x_col')]
