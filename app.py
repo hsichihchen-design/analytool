@@ -34,7 +34,7 @@ for key, value in default_states.items():
 # ==========================================
 # 1. 全域設定與 CSS
 # ==========================================
-st.set_page_config(page_title="作圖小工具 V33.1 (Gemini穩定版)", layout="wide", page_icon="✨")
+st.set_page_config(page_title="作圖小工具 V34 (AI強韌版)", layout="wide", page_icon="✨")
 
 def inject_custom_css(font_family):
     st.markdown(f"""
@@ -44,7 +44,6 @@ def inject_custom_css(font_family):
         }}
         .stDownloadButton button {{ width: 100%; border-color: #4CAF50; color: #4CAF50; }}
         
-        /* 智慧建議按鈕樣式 */
         div.stButton > button {{
             width: 100%; min-height: 50px; height: auto; white-space: normal; word-wrap: break-word;
             padding: 8px 12px; line-height: 1.3; border-radius: 6px; border: 1px solid #e0e0e0;
@@ -52,7 +51,7 @@ def inject_custom_css(font_family):
             font-size: 0.95rem;
         }}
         div.stButton > button:hover {{
-            border-color: #7c4dff; color: #7c4dff; background-color: #f5f0ff; /* Gemini 紫色風格 */
+            border-color: #7c4dff; color: #7c4dff; background-color: #f5f0ff;
             box-shadow: 0 2px 4px rgba(0,0,0,0.05); transform: translateY(-1px);
         }}
         
@@ -61,7 +60,6 @@ def inject_custom_css(font_family):
             margin-top: 15px; margin-bottom: 8px; display: flex; align-items: center;
         }}
         
-        /* API Key 輸入框美化 */
         [data-testid="stSidebar"] [data-testid="stTextInput"] input {{
             border-color: #7c4dff;
         }}
@@ -69,28 +67,23 @@ def inject_custom_css(font_family):
     """, unsafe_allow_html=True)
 
 # ==========================================
-# 2. 核心功能：Gemini AI 分析引擎
+# 2. 核心功能：Gemini AI 分析引擎 (自動切換模型版)
 # ==========================================
 
 def analyze_with_gemini(df, api_key):
     """
-    呼叫 Gemini API 進行資料分析，回傳建議的圖表 JSON 列表。
+    呼叫 Gemini API，具備模型自動 fallback 機制。
     """
     if not api_key:
         return None, "請先在側邊欄輸入 Gemini API Key 才能啟動 AI 分析。"
 
     try:
-        # 1. 設定 API
         genai.configure(api_key=api_key)
         
-        # 【修正點】改用最穩定的 gemini-pro 模型，避免 404 錯誤
-        model = genai.GenerativeModel('gemini-pro')
-
-        # 2. 準備資料摘要 (只傳送標題與前 5 筆資料，保護隱私並節省 Token)
+        # 準備資料摘要
         data_preview = df.head(5).to_markdown(index=False)
         columns_info = str(df.dtypes.to_dict())
 
-        # 3. 定義 Prompt (咒語)
         prompt = f"""
         你是一位專業的商業數據分析師。請分析以下 datasets 的欄位結構與內容樣本：
         
@@ -120,31 +113,44 @@ def analyze_with_gemini(df, api_key):
         "散佈圖 (Scatter)", "箱型圖 (Box Plot)", "面積圖 (Area)", "直方圖 (Histogram)", "雷達圖 (Radar)"
         """
 
-        # 4. 發送請求
-        response = model.generate_content(prompt)
+        # === 核心修正：多模型嘗試機制 ===
+        # 優先嘗試 1.5 Flash (最快)，如果報錯 (404/500)，則嘗試 Pro
+        models_to_try = ['gemini-1.5-flash', 'gemini-pro']
+        response = None
+        last_error = None
+
+        for model_name in models_to_try:
+            try:
+                # 嘗試建立模型並生成
+                model = genai.GenerativeModel(model_name)
+                response = model.generate_content(prompt)
+                break # 如果成功，跳出迴圈
+            except Exception as e:
+                last_error = e
+                print(f"Model {model_name} failed, trying next...")
+                continue # 失敗則嘗試下一個
+
+        if not response:
+            return None, f"AI 連線失敗，請檢查 API Key 是否正確，或稍後再試。(錯誤代碼: {str(last_error)})"
         
-        # 5. 清理與解析 JSON
+        # 清理與解析 JSON
         json_str = response.text.strip()
-        # 移除可能存在的 markdown code block 符號
-        if json_str.startswith("```json"):
-            json_str = json_str[7:]
-        if json_str.startswith("```"): # 有些模型只回傳 ```
-            json_str = json_str[3:]
-        if json_str.endswith("```"):
-            json_str = json_str[:-3]
+        if json_str.startswith("```json"): json_str = json_str[7:]
+        if json_str.startswith("```"): json_str = json_str[3:]
+        if json_str.endswith("```"): json_str = json_str[:-3]
             
         insights = json.loads(json_str)
         return insights, None
 
     except Exception as e:
-        return None, f"AI 分析失敗: {str(e)}"
+        return None, f"AI 分析發生未預期錯誤: {str(e)}"
 
 # ==========================================
 # 3. 詳細版使用說明書
 # ==========================================
 def get_manual_content():
     return """
-# 📊 作圖小工具 (V33 AI版) 使用手冊
+# 📊 作圖小工具 (V34 AI版) 使用手冊
 
 本工具整合了 Google Gemini AI 模型，能像真人分析師一樣，自動讀懂您的資料並建議圖表。
 
@@ -240,7 +246,6 @@ st.title("✨ 作圖小工具 (Gemini AI版)")
 with st.sidebar:
     st.header("1. 資料來源")
     
-    # === 新增 API Key 輸入框 ===
     st.session_state['gemini_api_key'] = st.text_input("🔑 Gemini API Key", value=st.session_state['gemini_api_key'], type="password", help="請輸入您的 Google Gemini API Key 以啟用智慧分析功能")
     if not st.session_state['gemini_api_key']:
         st.caption("👉 [點此申請免費 Key](https://aistudio.google.com/app/apikey)")
@@ -269,7 +274,6 @@ if uploaded_files:
     df = load_data(current_file)
     
     if df is not None:
-        # 時間粒度
         date_cols = [c for c in df.columns if pd.api.types.is_datetime64_any_dtype(df[c])]
         if date_cols:
             with st.sidebar:
@@ -288,22 +292,16 @@ if uploaded_files:
         cat_cols = df.select_dtypes(exclude=['number', 'datetime']).columns.tolist()
         all_cols = df.columns.tolist()
         
-        # 定義選單內容 (為了同步 Side bar，必須移到這裡定義)
         chart_types_list = ["長條圖 (Bar)", "折線圖 (Line)", "雙軸組合圖 (Combo)", "圓餅圖 (Pie)", "樹狀圖 (TreeMap)", "散佈圖 (Scatter)", "箱型圖 (Box Plot)", "面積圖 (Area)", "直方圖 (Histogram)", "雷達圖 (Radar)", "漏斗圖 (Funnel)"]
         agg_funcs_list = ["總和 (Sum)", "平均 (Avg)", "最大值 (Max)", "最小值 (Min)", "計數 (Count)"]
         sort_orders_list = ["預設 (依 X 軸)", "數值由大到小 (Desc)", "數值由小到大 (Asc)"]
 
-        # ==========================================
-        # 核心：Gemini 分析建議區
-        # ==========================================
         st.markdown("---")
         st.subheader("🤖 Gemini 智慧分析建議 (AI Insights)")
         
         if not st.session_state['gemini_api_key']:
             st.warning("⚠️ 請在左側側邊欄輸入 **Gemini API Key**，AI 才能開始為您分析數據。")
         else:
-            # 為了避免每次任何小動作都 call API，可以使用簡單的 cache 機制或按鈕觸發
-            # 這裡為了體驗流暢，假設使用者上傳檔案後會自動觸發(若要省錢可加個按鈕)
             if 'last_analyzed_file' not in st.session_state or st.session_state['last_analyzed_file'] != selected_file_name:
                 with st.spinner("🤖 Gemini 正在讀取數據並思考圖表策略... (約需 3-5 秒)"):
                     insights, error_msg = analyze_with_gemini(df, st.session_state['gemini_api_key'])
@@ -314,7 +312,6 @@ if uploaded_files:
                         st.session_state['ai_insights'] = insights
                         st.session_state['last_analyzed_file'] = selected_file_name
             
-            # 顯示建議
             if st.session_state.get('ai_insights'):
                 insights = st.session_state['ai_insights']
                 groups = sorted(list(set(ins['group'] for ins in insights)))
@@ -326,16 +323,12 @@ if uploaded_files:
                     for i, insight in enumerate(group_insights):
                         with cols[i % 3]:
                             if st.button(insight['title'], key=f"btn_{group_name}_{i}"):
-                                # 解析 AI 回傳的參數並同步到 Session State
                                 c_type = insight.get('chart_type', '長條圖 (Bar)')
-                                # 容錯處理：如果 AI 回傳的字串有誤差，預設回長條圖
                                 if c_type not in chart_types_list: c_type = '長條圖 (Bar)'
                                 
-                                c_idx = chart_types_list.index(c_type)
-                                st.session_state['chart_type_idx'] = c_idx
+                                st.session_state['chart_type_idx'] = chart_types_list.index(c_type)
                                 st.session_state['chart_type_box'] = c_type
                                 
-                                # 排序
                                 sort_str = insight.get('sort', 'none')
                                 s_idx = 0
                                 if sort_str == 'desc': s_idx = 1
@@ -343,7 +336,6 @@ if uploaded_files:
                                 st.session_state['sort_order_idx'] = s_idx
                                 st.session_state['sort_order_box'] = sort_orders_list[s_idx]
 
-                                # 輔助函式：同步 Selectbox
                                 def sync_box(key_idx, key_box, col_list, target_val):
                                     if target_val and target_val in col_list:
                                         st.session_state[key_idx] = col_list.index(target_val)
@@ -356,7 +348,6 @@ if uploaded_files:
                                 sync_box('y_col_idx', 'y_col_box', num_cols, insight.get('y_col'))
                                 sync_box('color_col_idx', 'color_col_box', ["(無)"]+all_cols, insight.get('color_col'))
                                 
-                                # 樹狀圖特殊處理
                                 if c_type == "樹狀圖 (TreeMap)" and insight.get('x_col'):
                                     st.session_state['treemap_path'] = [insight.get('x_col')]
                                     st.session_state['treemap_box'] = [insight.get('x_col')]
