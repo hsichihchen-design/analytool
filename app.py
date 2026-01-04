@@ -184,14 +184,6 @@ def analyze_with_gemini(df, api_key):
 # ==========================================
 # 3. 輔助與資料載入
 # ==========================================
-def get_manual_content():
-    return """
-# 📊 作圖小工具 V80 (Lyra Time-Keeper)
-## 核心修復
-1. **折線圖亂跑修復**：強制加入時序鎖定機制，確保折線圖與面積圖永遠依照 X 軸（時間）順序由左至右繪製，不再受數值排序影響。
-2. **箱型圖/散佈圖優化**：保留原始數據分佈，正確顯示統計特徵。
-3. **模糊匹配**：自動修正 AI 回傳的圖表名稱誤差。
-    """
 
 @st.cache_data
 def generate_demo_excel():
@@ -281,61 +273,8 @@ if uploaded_files:
         cat_cols = df.select_dtypes(exclude=['number', 'datetime']).columns.tolist()
         all_cols = df.columns.tolist()
         agg_funcs_list = ["總和 (Sum)", "平均 (Avg)", "最大值 (Max)", "計數 (Count)"]
-        
-        # --- AI 分析區塊 ---
-        st.markdown("---")
-        st.subheader("🤖 Lyra 深度分析建議")
-        
-        if st.session_state['gemini_api_key']:
-            if 'last_analyzed_file' not in st.session_state or st.session_state['last_analyzed_file'] != selected_file_name:
-                with st.spinner("🧠 正在構建分析矩陣..."):
-                    insights, error_msg = analyze_with_gemini(df, st.session_state['gemini_api_key'])
-                    if not error_msg:
-                        st.session_state['ai_insights'] = insights
-                        st.session_state['last_analyzed_file'] = selected_file_name
-            
-            if st.session_state.get('ai_insights'):
-                insights = st.session_state['ai_insights']
-                groups = sorted(list(set(ins['group'] for ins in insights)))
-                for group_name in groups:
-                    st.markdown(f"<div class='group-header'>{group_name}</div>", unsafe_allow_html=True)
-                    cols = st.columns(7) 
-                    group_insights = [ins for ins in insights if ins['group'] == group_name]
-                    for i, insight in enumerate(group_insights):
-                        with cols[i % 7]:
-                            if st.button(insight['title'], key=f"btn_{group_name}_{i}"):
-                                # 模糊匹配
-                                raw_type = insight.get('chart_type', '')
-                                matched_type = "長條圖 (Bar)"
-                                for standard_type in CHART_TYPES:
-                                    keywords = standard_type.split(' ')
-                                    if any(k.strip("()") in raw_type for k in keywords if len(k)>2):
-                                        matched_type = standard_type
-                                        break
-                                
-                                st.session_state['chart_type_idx'] = CHART_TYPES.index(matched_type)
-                                st.session_state['chart_type_box'] = matched_type
-                                
-                                def sync(key, val, candidates):
-                                    if val in candidates: st.session_state[f"{key}_idx"], st.session_state[f"{key}_box"] = candidates.index(val), val
-                                    else: st.session_state[f"{key}_idx"] = 0
-                                
-                                sync('x_col', insight.get('x_col'), all_cols)
-                                sync('y_col', insight.get('y_col'), num_cols)
-                                sync('color_col', insight.get('color_col'), ["(無)"]+all_cols)
-                                
-                                sort_str = insight.get('sort', 'none')
-                                if sort_str == 'desc': st.session_state['sort_order_idx'] = 1
-                                elif sort_str == 'asc': st.session_state['sort_order_idx'] = 2
-                                else: st.session_state['sort_order_idx'] = 0
-                                
-                                if matched_type == "樹狀圖 (TreeMap)" and insight.get('x_col'):
-                                     st.session_state['treemap_path'] = [insight.get('x_col')]
-                                     st.session_state['treemap_box'] = [insight.get('x_col')]
-                                
-                                st.rerun()
 
-        # --- 繪圖設定區 ---
+        # --- 繪圖設定區 (Sidebar) ---
         with st.sidebar:
             st.markdown("---")
             st.header("2. 繪圖設定")
@@ -365,86 +304,154 @@ if uploaded_files:
                 agg_func = st.selectbox("計算", agg_funcs_list, index=st.session_state['agg_func_idx'], key='agg_func_box')
                 color_col = st.selectbox("分組", ["(無)"] + all_cols, index=st.session_state['color_col_idx'], key='color_col_box')
 
-        # --- [Lyra Rendering Engine V80] ---
-        if df is not None:
-            try:
-                agg_map = {"總和 (Sum)": "sum", "平均 (Avg)": "mean", "最大值 (Max)": "max", "計數 (Count)": "count"}
-                real_agg = agg_map[agg_func]
-                
-                # 數據分流
-                use_raw_data = chart_type in RAW_DATA_CHARTS
-                
-                if use_raw_data:
-                    df_agg = df.copy()
+        # ==========================================
+        # [核心改動] 5. 優先執行繪圖引擎 (Render Chart First)
+        # ==========================================
+        current_chart_fig = None
+        
+        try:
+            agg_map = {"總和 (Sum)": "sum", "平均 (Avg)": "mean", "最大值 (Max)": "max", "計數 (Count)": "count"}
+            real_agg = agg_map[agg_func]
+            
+            # 數據分流
+            use_raw_data = chart_type in RAW_DATA_CHARTS
+            
+            if use_raw_data:
+                df_agg = df.copy()
+            else:
+                if chart_type == "雙軸組合圖 (Combo)":
+                     grp_cols = [x_col]
+                     if color_col != "(無)": grp_cols.append(color_col)
+                     df_agg = df.groupby(grp_cols, as_index=False)[[y_col, y_col_2]].agg(real_agg)
+                elif chart_type == "樹狀圖 (TreeMap)":
+                     if not treemap_path: df_agg = None
+                     else: df_agg = df.groupby(treemap_path, as_index=False)[y_col].agg(real_agg)
+                elif chart_type == "雷達圖 (Radar)":
+                     grp_cols = [x_col]
+                     if color_col != "(無)": grp_cols.append(color_col)
+                     df_agg = df.groupby(grp_cols, as_index=False)[y_col].agg(real_agg)
                 else:
-                    if chart_type == "雙軸組合圖 (Combo)":
-                         grp_cols = [x_col]
-                         if color_col != "(無)": grp_cols.append(color_col)
-                         df_agg = df.groupby(grp_cols, as_index=False)[[y_col, y_col_2]].agg(real_agg)
-                    elif chart_type == "樹狀圖 (TreeMap)":
-                         if not treemap_path: df_agg = None
-                         else: df_agg = df.groupby(treemap_path, as_index=False)[y_col].agg(real_agg)
-                    elif chart_type == "雷達圖 (Radar)":
-                         grp_cols = [x_col]
-                         if color_col != "(無)": grp_cols.append(color_col)
-                         df_agg = df.groupby(grp_cols, as_index=False)[y_col].agg(real_agg)
-                    else:
-                        grp_cols = [x_col]
-                        if color_col != "(無)": grp_cols.append(color_col)
-                        df_agg = df.groupby(grp_cols, as_index=False)[y_col].agg(real_agg)
+                    grp_cols = [x_col]
+                    if color_col != "(無)": grp_cols.append(color_col)
+                    df_agg = df.groupby(grp_cols, as_index=False)[y_col].agg(real_agg)
 
-                    # [Lyra Logic] X 軸數值型日期轉字串 (防斷層)
-                    if df_agg is not None and x_col in df_agg.columns and pd.api.types.is_numeric_dtype(df_agg[x_col]):
-                        col_mean = df_agg[x_col].mean()
-                        if (1900 < col_mean < 2100) or (190000 < col_mean < 210012):
-                            df_agg[x_col] = df_agg[x_col].astype(str)
+            # [Lyra Logic] X 軸數值型日期轉字串 (防斷層)
+            if df_agg is not None and x_col in df_agg.columns and pd.api.types.is_numeric_dtype(df_agg[x_col]):
+                col_mean = df_agg[x_col].mean()
+                if (1900 < col_mean < 2100) or (190000 < col_mean < 210012):
+                    df_agg[x_col] = df_agg[x_col].astype(str)
 
-                # [Lyra V80 Feature] 時序鎖定 (Chronological Lock)
-                # 即使上方面板或 AI 指定了排序，若為折線/面積圖，強制依照 X 軸排序
-                if chart_type in ["折線圖 (Line)", "面積圖 (Area)"] and df_agg is not None:
-                    df_agg = df_agg.sort_values(by=x_col, ascending=True)
-                # 其他聚合圖表依設定排序
-                elif not use_raw_data and df_agg is not None and chart_type not in ["樹狀圖 (TreeMap)", "雷達圖 (Radar)"]:
-                    sort_idx = st.session_state['sort_order_idx']
-                    if sort_idx == 1: df_agg = df_agg.sort_values(by=y_col, ascending=False)
-                    elif sort_idx == 2: df_agg = df_agg.sort_values(by=y_col, ascending=True)
+            # [Lyra V80 Feature] 時序鎖定 (Chronological Lock)
+            if chart_type in ["折線圖 (Line)", "面積圖 (Area)"] and df_agg is not None:
+                df_agg = df_agg.sort_values(by=x_col, ascending=True)
+            elif not use_raw_data and df_agg is not None and chart_type not in ["樹狀圖 (TreeMap)", "雷達圖 (Radar)"]:
+                sort_idx = st.session_state['sort_order_idx']
+                if sort_idx == 1: df_agg = df_agg.sort_values(by=y_col, ascending=False)
+                elif sort_idx == 2: df_agg = df_agg.sort_values(by=y_col, ascending=True)
 
-                # 開始繪圖
-                if df_agg is not None:
-                    fig = None
-                    common_params = {"data_frame": df_agg, "x": x_col if x_col in df_agg.columns else None, "title": f"{chart_type}: {x_col if x_col else ''}"}
-                    if color_col != "(無)" and color_col in df_agg.columns: common_params["color"] = color_col
+            # 開始繪圖
+            if df_agg is not None:
+                common_params = {"data_frame": df_agg, "x": x_col if x_col in df_agg.columns else None, "title": f"{chart_type}: {x_col if x_col else ''}"}
+                if color_col != "(無)" and color_col in df_agg.columns: common_params["color"] = color_col
 
-                    if chart_type == "長條圖 (Bar)":
-                        fig = px.bar(**common_params, y=y_col, text_auto='.2s')
-                    elif chart_type == "折線圖 (Line)":
-                        fig = px.line(**common_params, y=y_col, markers=True)
-                    elif chart_type == "面積圖 (Area)":
-                        fig = px.area(**common_params, y=y_col)
-                    elif chart_type == "漏斗圖 (Funnel)":
-                        fig = px.funnel(**common_params, y=y_col)
-                    elif chart_type == "雙軸組合圖 (Combo)":
-                        fig = make_subplots(specs=[[{"secondary_y": True}]])
-                        fig.add_trace(go.Bar(x=df_agg[x_col], y=df_agg[y_col], name=y_col, marker_color='#636EFA', opacity=0.8), secondary_y=False)
-                        fig.add_trace(go.Scatter(x=df_agg[x_col], y=df_agg[y_col_2], name=y_col_2, mode='lines+markers', line=dict(color='#EF553B', width=3)), secondary_y=True)
-                        fig.update_layout(title=f"{y_col} vs {y_col_2}")
-                    elif chart_type == "圓餅圖 (Pie)":
-                        fig = px.pie(df_agg, values=y_col, names=x_col, title=f"{x_col} 佔比")
-                    elif chart_type == "樹狀圖 (TreeMap)":
-                        fig = px.treemap(df_agg, path=treemap_path, values=y_col, color=color_col if color_col!="(無)" else y_col, title="層級分析")
-                    elif chart_type == "雷達圖 (Radar)":
-                         fig = px.line_polar(df_agg, r=y_col, theta=x_col, line_close=True, color=color_col if color_col != "(無)" else None, title="雷達分析")
-                         fig.update_traces(fill='toself')
-                    elif chart_type == "直方圖 (Histogram)":
-                        fig = px.histogram(df_agg, x=x_col, color=color_col if color_col!="(無)" else None, title=f"{x_col} 分佈")
-                    elif chart_type == "箱型圖 (Box Plot)":
-                        fig = px.box(df_agg, x=x_col, y=y_col, color=color_col if color_col!="(無)" else None, title=f"{y_col} 分佈 (by {x_col})")
-                    elif chart_type == "散佈圖 (Scatter)":
-                        fig = px.scatter(df_agg, x=x_col, y=y_col, color=color_col if color_col!="(無)" else None, title=f"{x_col} vs {y_col}")
+                if chart_type == "長條圖 (Bar)":
+                    current_chart_fig = px.bar(**common_params, y=y_col, text_auto='.2s')
+                elif chart_type == "折線圖 (Line)":
+                    current_chart_fig = px.line(**common_params, y=y_col, markers=True)
+                elif chart_type == "面積圖 (Area)":
+                    current_chart_fig = px.area(**common_params, y=y_col)
+                elif chart_type == "漏斗圖 (Funnel)":
+                    current_chart_fig = px.funnel(**common_params, y=y_col)
+                elif chart_type == "雙軸組合圖 (Combo)":
+                    current_chart_fig = make_subplots(specs=[[{"secondary_y": True}]])
+                    current_chart_fig.add_trace(go.Bar(x=df_agg[x_col], y=df_agg[y_col], name=y_col, marker_color='#636EFA', opacity=0.8), secondary_y=False)
+                    current_chart_fig.add_trace(go.Scatter(x=df_agg[x_col], y=df_agg[y_col_2], name=y_col_2, mode='lines+markers', line=dict(color='#EF553B', width=3)), secondary_y=True)
+                    current_chart_fig.update_layout(title=f"{y_col} vs {y_col_2}")
+                elif chart_type == "圓餅圖 (Pie)":
+                    current_chart_fig = px.pie(df_agg, values=y_col, names=x_col, title=f"{x_col} 佔比")
+                elif chart_type == "樹狀圖 (TreeMap)":
+                    current_chart_fig = px.treemap(df_agg, path=treemap_path, values=y_col, color=color_col if color_col!="(無)" else y_col, title="層級分析")
+                elif chart_type == "雷達圖 (Radar)":
+                     current_chart_fig = px.line_polar(df_agg, r=y_col, theta=x_col, line_close=True, color=color_col if color_col != "(無)" else None, title="雷達分析")
+                     current_chart_fig.update_traces(fill='toself')
+                elif chart_type == "直方圖 (Histogram)":
+                    current_chart_fig = px.histogram(df_agg, x=x_col, color=color_col if color_col!="(無)" else None, title=f"{x_col} 分佈")
+                elif chart_type == "箱型圖 (Box Plot)":
+                    current_chart_fig = px.box(df_agg, x=x_col, y=y_col, color=color_col if color_col!="(無)" else None, title=f"{y_col} 分佈 (by {x_col})")
+                elif chart_type == "散佈圖 (Scatter)":
+                    current_chart_fig = px.scatter(df_agg, x=x_col, y=y_col, color=color_col if color_col!="(無)" else None, title=f"{x_col} vs {y_col}")
 
-                    if fig:
-                        fig.update_layout(template="plotly_white", height=600, font=dict(family=font_choice.split(',')[0].strip("'"), size=16), hovermode="x unified")
-                        st.plotly_chart(fig, use_container_width=True)
+        except Exception as e:
+            st.error(f"繪圖錯誤: {e}")
 
-            except Exception as e:
-                st.error(f"繪圖錯誤: {e}")
+        # -------------------------------------------------------
+        # [UI 優化] 顯示圖表 (Hero Section)
+        # -------------------------------------------------------
+        if current_chart_fig:
+            # 稍微調整圖表高度，讓它更顯眼
+            current_chart_fig.update_layout(template="plotly_white", height=500, font=dict(family=font_choice.split(',')[0].strip("'"), size=16), hovermode="x unified")
+            st.plotly_chart(current_chart_fig, use_container_width=True)
+        else:
+            st.info("👈 請從左側選擇圖表類型，或等待下方 AI 產生建議。")
+
+        st.markdown("---")
+
+        # ==========================================
+        # 6. AI 分析與控制面板 (Controls Section)
+        # ==========================================
+        st.subheader("🤖 Lyra 深度分析建議")
+        
+        if st.session_state['gemini_api_key']:
+            if 'last_analyzed_file' not in st.session_state or st.session_state['last_analyzed_file'] != selected_file_name:
+                with st.spinner("🧠 正在構建分析矩陣..."):
+                    insights, error_msg = analyze_with_gemini(df, st.session_state['gemini_api_key'])
+                    if not error_msg:
+                        st.session_state['ai_insights'] = insights
+                        st.session_state['last_analyzed_file'] = selected_file_name
+            
+            if st.session_state.get('ai_insights'):
+                insights = st.session_state['ai_insights']
+                groups = sorted(list(set(ins['group'] for ins in insights)))
+                
+                # ★ [UI 優化] 使用固定高度容器，防止按鈕區無限拉長
+                with st.container(height=450, border=True):
+                    st.caption("點擊按鈕，上方圖表將自動切換：")
+                    
+                    for group_name in groups:
+                        st.markdown(f"<div class='group-header'>{group_name}</div>", unsafe_allow_html=True)
+                        cols = st.columns(5) # 調整為 5 欄，在容器中較美觀
+                        group_insights = [ins for ins in insights if ins['group'] == group_name]
+                        for i, insight in enumerate(group_insights):
+                            with cols[i % 5]:
+                                if st.button(insight['title'], key=f"btn_{group_name}_{i}"):
+                                    # 模糊匹配圖表名稱
+                                    raw_type = insight.get('chart_type', '')
+                                    matched_type = "長條圖 (Bar)"
+                                    for standard_type in CHART_TYPES:
+                                        keywords = standard_type.split(' ')
+                                        if any(k.strip("()") in raw_type for k in keywords if len(k)>2):
+                                            matched_type = standard_type
+                                            break
+                                    
+                                    # 更新 State
+                                    st.session_state['chart_type_idx'] = CHART_TYPES.index(matched_type)
+                                    st.session_state['chart_type_box'] = matched_type
+                                    
+                                    def sync(key, val, candidates):
+                                        if val in candidates: st.session_state[f"{key}_idx"], st.session_state[f"{key}_box"] = candidates.index(val), val
+                                        else: st.session_state[f"{key}_idx"] = 0
+                                    
+                                    sync('x_col', insight.get('x_col'), all_cols)
+                                    sync('y_col', insight.get('y_col'), num_cols)
+                                    sync('color_col', insight.get('color_col'), ["(無)"]+all_cols)
+                                    
+                                    sort_str = insight.get('sort', 'none')
+                                    if sort_str == 'desc': st.session_state['sort_order_idx'] = 1
+                                    elif sort_str == 'asc': st.session_state['sort_order_idx'] = 2
+                                    else: st.session_state['sort_order_idx'] = 0
+                                    
+                                    if matched_type == "樹狀圖 (TreeMap)" and insight.get('x_col'):
+                                         st.session_state['treemap_path'] = [insight.get('x_col')]
+                                         st.session_state['treemap_box'] = [insight.get('x_col')]
+                                    
+                                    st.rerun()
