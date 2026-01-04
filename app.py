@@ -13,8 +13,8 @@ import json
 # ==========================================
 # 0. 初始化 Session State
 # ==========================================
-# 注意：為了避免衝突，我們主要依賴 _idx 來控制 Widget 的狀態
 default_states = {
+    'menu_id': 0, # [關鍵修復] 用來強制刷新 Sidebar 元件的計數器
     'chart_type_idx': 0, 
     'x_col_idx': 0,
     'y_col_idx': 0,
@@ -276,80 +276,57 @@ if uploaded_files:
             st.markdown("---")
             st.header("2. 繪圖設定")
             
-            # 重要：使用 key 時，我們讓 widget 讀取 session_state 內的 xxx_idx 作為初始 index
-            # 如果使用者手動更改，index 會自動更新到 key='chart_type_idx_key' 的變數中 (其實不需要，Streamlit 自動管理)
-            # 這裡我們只傳入 index 參數，並使用 on_change callback 來更新 (簡化版：直接讀取 session_state)
-            
+            # [核心修正] 使用 menu_id 讓 Key 動態變化，強制 Streamlit 刷新 Widget
+            # 當使用者點擊 AI 按鈕 -> menu_id + 1 -> Key 改變 -> Widget 重新讀取 index
+            uid = st.session_state['menu_id']
+
             def update_idx(key_name, options_list):
-                # 這是個 helper 函式，用來確保 index 不會超出範圍
                 val = st.session_state.get(f"{key_name}_idx", 0)
                 if val >= len(options_list): val = 0
                 return val
 
+            # 1. 圖表類型
             chart_type_idx = update_idx('chart_type', CHART_TYPES)
-            chart_type = st.selectbox("圖表類型", CHART_TYPES, index=chart_type_idx)
-            # 注意：這裡我們不給 key，讓它單純由 index 控制。如果給了 key，就需要更複雜的 state 管理。
-            # 但為了讓下方按鈕能改變它，我們必須在按鈕邏輯中修改 'chart_type_idx'，然後 rerun。
-            # 而這個 widget 每次 rerun 都會讀取 st.session_state['chart_type_idx'] (透過上面那一指派)
-            # 等等，st.selectbox 的 index 參數只在第一次渲染有效，除非用 key。
-            # 正確做法：用 key 綁定一個與 'chart_type_idx' 不同的變數，或者每次強制更新。
-            
-            # 修正方案：
-            # 我們讓 Widget 顯示的值由 st.session_state 決定。
-            # 當 Widget 改變時，更新 session_state。
-            
-            def on_chart_change():
-                st.session_state['chart_type_idx'] = CHART_TYPES.index(st.session_state['chart_type_box'])
-            
-            # 這裡還是用 box 做 key，但我們不在按鈕那邊直接改 box，而是改 idx，這裡也不綁定 idx
-            # 其實最簡單的方法是：完全依賴 session_state['chart_type_idx']
-            # 但 st.selectbox(..., index=st.session_state['chart_type_idx']) 會有個問題：
-            # 如果使用者手動選了別的，session_state['chart_type_idx'] 不會自動更新。
-            # 所以我們需要手動更新它。
-            
             chart_type = st.selectbox(
-                "圖表類型", 
-                CHART_TYPES, 
-                index=st.session_state['chart_type_idx'],
-                key='chart_type_widget' # 獨立的 key
+                "圖表類型", CHART_TYPES, 
+                index=chart_type_idx, 
+                key=f"chart_type_{uid}" # Dynamic Key
             )
-            # 手動同步 Widget 選擇回 State (當使用者手動切換時)
-            if chart_type != CHART_TYPES[st.session_state['chart_type_idx']]:
+            # 即時同步手動變更回 State
+            if chart_type in CHART_TYPES:
                 st.session_state['chart_type_idx'] = CHART_TYPES.index(chart_type)
-                st.rerun()
 
-            # UI
+            # UI 條件渲染 (全都加上 uid 確保刷新)
             if chart_type == "雙軸組合圖 (Combo)":
-                x_col = st.selectbox("X 軸", all_cols, index=update_idx('x_col', all_cols), key='x_col_widget')
-                y_col = st.selectbox("左軸數值", num_cols, index=update_idx('y_col', num_cols), key='y_col_widget')
-                y_col_2 = st.selectbox("右軸數值", num_cols, index=update_idx('y_col_2', num_cols), key='y_col_2_widget')
-                agg_func = st.selectbox("計算", agg_funcs_list, index=update_idx('agg_func', agg_funcs_list), key='agg_func_widget')
-                color_col = st.selectbox("分組", ["(無)"] + all_cols, index=update_idx('color_col', ["(無)"]+all_cols), key='color_col_widget')
+                x_col = st.selectbox("X 軸", all_cols, index=update_idx('x_col', all_cols), key=f'x_col_{uid}')
+                y_col = st.selectbox("左軸數值", num_cols, index=update_idx('y_col', num_cols), key=f'y_col_{uid}')
+                y_col_2 = st.selectbox("右軸數值", num_cols, index=update_idx('y_col_2', num_cols), key=f'y_col_2_{uid}')
+                agg_func = st.selectbox("計算", agg_funcs_list, index=update_idx('agg_func', agg_funcs_list), key=f'agg_func_{uid}')
+                color_col = st.selectbox("分組", ["(無)"] + all_cols, index=update_idx('color_col', ["(無)"]+all_cols), key=f'color_col_{uid}')
             elif chart_type == "樹狀圖 (TreeMap)":
                 default_tree_path = st.session_state['treemap_path'] if st.session_state['treemap_path'] else (cat_cols[:2] if len(cat_cols)>=2 else cat_cols[:1])
-                # Multiselect 比較特殊，直接用 default
-                treemap_path = st.multiselect("層級結構", cat_cols, default=default_tree_path, key='treemap_widget')
-                y_col = st.selectbox("數值大小", num_cols, index=update_idx('y_col', num_cols), key='y_col_widget')
-                color_col = st.selectbox("顏色依據", ["(無)"] + num_cols + cat_cols, index=update_idx('color_col', ["(無)"]+num_cols+cat_cols), key='color_col_widget')
-                agg_func = st.selectbox("計算", agg_funcs_list, index=update_idx('agg_func', agg_funcs_list), key='agg_func_widget')
+                treemap_path = st.multiselect("層級結構", cat_cols, default=default_tree_path, key=f'treemap_{uid}')
+                y_col = st.selectbox("數值大小", num_cols, index=update_idx('y_col', num_cols), key=f'y_col_{uid}')
+                color_col = st.selectbox("顏色依據", ["(無)"] + num_cols + cat_cols, index=update_idx('color_col', ["(無)"]+num_cols+cat_cols), key=f'color_col_{uid}')
+                agg_func = st.selectbox("計算", agg_funcs_list, index=update_idx('agg_func', agg_funcs_list), key=f'agg_func_{uid}')
             elif chart_type == "雷達圖 (Radar)":
-                x_col = st.selectbox("維度 (Label)", cat_cols, index=update_idx('x_col', cat_cols), key='x_col_widget')
-                y_col = st.selectbox("數值 (Value)", num_cols, index=update_idx('y_col', num_cols), key='y_col_widget')
-                color_col = st.selectbox("分組", ["(無)"] + all_cols, index=update_idx('color_col', ["(無)"]+all_cols), key='color_col_widget')
-                agg_func = st.selectbox("計算", agg_funcs_list, index=update_idx('agg_func', agg_funcs_list), key='agg_func_widget')
+                x_col = st.selectbox("維度 (Label)", cat_cols, index=update_idx('x_col', cat_cols), key=f'x_col_{uid}')
+                y_col = st.selectbox("數值 (Value)", num_cols, index=update_idx('y_col', num_cols), key=f'y_col_{uid}')
+                color_col = st.selectbox("分組", ["(無)"] + all_cols, index=update_idx('color_col', ["(無)"]+all_cols), key=f'color_col_{uid}')
+                agg_func = st.selectbox("計算", agg_funcs_list, index=update_idx('agg_func', agg_funcs_list), key=f'agg_func_{uid}')
             else:
-                x_col = st.selectbox("X 軸", all_cols, index=update_idx('x_col', all_cols), key='x_col_widget')
-                y_col = st.selectbox("Y 軸 (數值)", num_cols, index=update_idx('y_col', num_cols), key='y_col_widget')
-                agg_func = st.selectbox("計算", agg_funcs_list, index=update_idx('agg_func', agg_funcs_list), key='agg_func_widget')
-                color_col = st.selectbox("分組", ["(無)"] + all_cols, index=update_idx('color_col', ["(無)"]+all_cols), key='color_col_widget')
+                x_col = st.selectbox("X 軸", all_cols, index=update_idx('x_col', all_cols), key=f'x_col_{uid}')
+                y_col = st.selectbox("Y 軸 (數值)", num_cols, index=update_idx('y_col', num_cols), key=f'y_col_{uid}')
+                agg_func = st.selectbox("計算", agg_funcs_list, index=update_idx('agg_func', agg_funcs_list), key=f'agg_func_{uid}')
+                color_col = st.selectbox("分組", ["(無)"] + all_cols, index=update_idx('color_col', ["(無)"]+all_cols), key=f'color_col_{uid}')
             
-            # 手動同步其他 widget 回 state (確保手動切換有效)
-            # 這段邏輯是為了讓使用者手動切換 widget 時，State 也能更新，
-            # 這樣如果之後點其他按鈕，才不會跳回舊的設定。
+            # 手動同步邏輯 (讓 manual change 寫入 state)
             if 'x_col' in locals() and x_col in all_cols: st.session_state['x_col_idx'] = all_cols.index(x_col)
             if 'y_col' in locals() and y_col in num_cols: st.session_state['y_col_idx'] = num_cols.index(y_col)
-            # ... 其他同步比較繁瑣，這裡做最重要的幾個即可，或者省略。
-            # 關鍵是上面的 chart_type 同步一定要有。
+            if 'y_col_2' in locals() and y_col_2 in num_cols: st.session_state['y_col_2_idx'] = num_cols.index(y_col_2)
+            if 'color_col' in locals() and color_col in (["(無)"] + all_cols): st.session_state['color_col_idx'] = (["(無)"] + all_cols).index(color_col)
+            if 'agg_func' in locals() and agg_func in agg_funcs_list: st.session_state['agg_func_idx'] = agg_funcs_list.index(agg_func)
+            if 'treemap_path' in locals(): st.session_state['treemap_path'] = treemap_path
 
         # ==========================================
         # 5. 優先執行繪圖引擎 (Render Chart First)
@@ -435,7 +412,6 @@ if uploaded_files:
         # [UI 優化] 顯示圖表 (Hero Section)
         # -------------------------------------------------------
         if current_chart_fig:
-            # 稍微調整圖表高度，讓它更顯眼
             current_chart_fig.update_layout(template="plotly_white", height=500, font=dict(family=font_choice.split(',')[0].strip("'"), size=16), hovermode="x unified")
             st.plotly_chart(current_chart_fig, use_container_width=True)
         else:
@@ -460,13 +436,12 @@ if uploaded_files:
                 insights = st.session_state['ai_insights']
                 groups = sorted(list(set(ins['group'] for ins in insights)))
                 
-                # ★ [UI 優化] 使用固定高度容器，防止按鈕區無限拉長
                 with st.container(height=450, border=True):
                     st.caption("點擊按鈕，上方圖表將自動切換：")
                     
                     for group_name in groups:
                         st.markdown(f"<div class='group-header'>{group_name}</div>", unsafe_allow_html=True)
-                        cols = st.columns(5) # 調整為 5 欄，在容器中較美觀
+                        cols = st.columns(5)
                         group_insights = [ins for ins in insights if ins['group'] == group_name]
                         for i, insight in enumerate(group_insights):
                             with cols[i % 5]:
@@ -480,11 +455,9 @@ if uploaded_files:
                                             matched_type = standard_type
                                             break
                                     
-                                    # [關鍵修正]：只更新 _idx，完全不碰 _widget key
-                                    try:
-                                        st.session_state['chart_type_idx'] = CHART_TYPES.index(matched_type)
-                                    except:
-                                        st.session_state['chart_type_idx'] = 0
+                                    # 更新 State _idx
+                                    try: st.session_state['chart_type_idx'] = CHART_TYPES.index(matched_type)
+                                    except: st.session_state['chart_type_idx'] = 0
 
                                     def sync(key, val, candidates):
                                         if val in candidates: 
@@ -494,7 +467,6 @@ if uploaded_files:
                                     
                                     sync('x_col', insight.get('x_col'), all_cols)
                                     sync('y_col', insight.get('y_col'), num_cols)
-                                    # Combo chart 右軸的處理 (AI 通常只回傳 y_col，這裡暫時給個預設或邏輯)
                                     sync('y_col_2', insight.get('y_col'), num_cols) 
                                     sync('color_col', insight.get('color_col'), ["(無)"]+all_cols)
                                     
@@ -505,5 +477,8 @@ if uploaded_files:
                                     
                                     if matched_type == "樹狀圖 (TreeMap)" and insight.get('x_col'):
                                          st.session_state['treemap_path'] = [insight.get('x_col')]
+                                    
+                                    # [關鍵修正] 強制 State ID + 1 -> 迫使 Sidebar 元件重建 -> 讀取新的 index
+                                    st.session_state['menu_id'] += 1
                                     
                                     st.rerun()
