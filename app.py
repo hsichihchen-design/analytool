@@ -24,7 +24,9 @@ default_states = {
     'sort_order_idx': 0,
     'ref_line_val': 0.0,
     'treemap_path': [],
-    'gemini_api_key': ''
+    'gemini_api_key': '',
+    'ai_insights': [],
+    'last_analyzed_file': ''
 }
 
 for key, value in default_states.items():
@@ -32,9 +34,9 @@ for key, value in default_states.items():
         st.session_state[key] = value
 
 # ==========================================
-# 1. 全域設定與 CSS (V40 修正版)
+# 1. 全域設定與 CSS
 # ==========================================
-st.set_page_config(page_title="作圖小工具 V40", layout="wide", page_icon="✨")
+st.set_page_config(page_title="作圖小工具 V50 (Lyra AI版)", layout="wide", page_icon="✨")
 
 def inject_custom_css(font_family):
     # 字體設定
@@ -75,7 +77,6 @@ def inject_custom_css(font_family):
             font-family: {font_css_rule} !important;
         }}
         
-        /* [修正點 1] 增加上方留白，避免標題被切掉 */
         .block-container {{ padding-top: 3.5rem; }}
         
         [data-testid="stSidebar"] [data-testid="stTextInput"] input {{ border-color: #7c4dff; }}
@@ -83,7 +84,7 @@ def inject_custom_css(font_family):
     """, unsafe_allow_html=True)
 
 # ==========================================
-# 2. 核心功能：Gemini AI 分析引擎
+# 2. 核心功能：Gemini AI 分析引擎 (Lyra V2 Enhanced)
 # ==========================================
 
 def get_valid_model():
@@ -106,57 +107,104 @@ def analyze_with_gemini(df, api_key):
         model_name = get_valid_model()
         model = genai.GenerativeModel(model_name)
 
+        # --- [Lyra Upgrade] Python 端資料特徵工程 ---
         stats_info = {}
         for col in df.columns:
             n_unique = df[col].nunique()
             dtype = str(df[col].dtype)
-            stats_info[col] = f"Type: {dtype}, Unique: {n_unique}"
-            if n_unique < 10:
-                stats_info[col] += f", Examples: {list(df[col].unique())}"
+            missing_rate = df[col].isnull().mean() # 計算空值率
+            
+            # 建立欄位特徵指紋 (Data Fingerprint)
+            col_profile = {
+                "dtype": dtype,
+                "unique_count": n_unique,
+                "missing_rate": f"{missing_rate:.1%}"
+            }
+
+            # 針對數值型 (int/float) 增加統計特徵，幫助 AI 判斷是否為「年份」或「ID」
+            if pd.api.types.is_numeric_dtype(df[col]) and n_unique > 0:
+                try:
+                    col_profile["min"] = float(df[col].min())
+                    col_profile["max"] = float(df[col].max())
+                    col_profile["median"] = float(df[col].median()) # 中位數
+                except:
+                    pass
+            
+            # 採樣 (只取非空值)
+            try:
+                clean_samples = df[col].dropna().astype(str).sample(min(5, len(df))).tolist()
+            except:
+                clean_samples = []
+            col_profile["samples"] = clean_samples
+            
+            stats_info[col] = col_profile
 
         columns_summary = json.dumps(stats_info, ensure_ascii=False, indent=2)
-        data_preview = df.head(3).to_markdown(index=False)
+        # ---------------------------------------------
 
-        # [修正點 2] Prompt 新增「義大利麵條圖 (Spaghetti Chart)」禁令
+        # --- [Lyra Upgrade] 語意推論 Prompt 架構 ---
         prompt = f"""
-        你是一位精通資料視覺化的分析師。請分析資料，提供 20 個分析圖表建議。
-        
-        【欄位統計】：
+        <role>
+        你是一位擁有 20 年經驗的首席商業智慧 (BI) 顧問。你的專長是從雜亂的數據中識別出核心商業價值，並轉化為清晰的視覺化儀表板。
+        </role>
+
+        <task>
+        請分析提供的數據摘要 (Data Profile)，運用你的邏輯判斷欄位的「語意角色」，並生成 20 個高價值的圖表建議 JSON。
+        </task>
+
+        <data_profile>
         {columns_summary}
-        
-        【數據預覽】：
-        {data_preview}
-        
-        【嚴格規則】：
-        1. **標題限制**：嚴格控制在 **10 個中文字以內**。
-        2. **去除贅詞**：不要包含「分析」、「統計」、「圖表」等字。
-        3. **視覺防呆 (Spaghetti Chart Prevention)**：
-           - **折線圖 (Line)**：如果某個欄位的 Unique Values > 10，**絕對禁止**用該欄位做顏色分組 (`color_col`)，因為線條會太多太亂。改用 `color_col: null` 畫總體趨勢即可。
-           - **圓餅圖 (Pie)**：Unique > 15 禁止。
-           - **長條圖 (Bar)**：Unique > 50 禁止 (除非 Top N)。
-        4. **雙軸防呆**：左右軸必須是不同欄位。
-        
-        請回傳 **純 JSON 格式**：
+        </data_profile>
+
+        <thinking_process_guidelines>
+        在生成 JSON 之前，請在腦海中嚴格執行以下步驟 (不要輸出這些思考過程，僅作為生成依據)：
+
+        1. **角色標記 (Semantic Tagging)**:
+           - 掃描所有欄位，忽略程式的資料型態 (int/str)，改依據「欄位名稱」與「數值範圍」進行標記：
+             - **[TIME]**: 日期概念。特徵：名稱含 Date/Year/Time/YM，或數值範圍類似 2021~2025, 20230101。
+             - **[ID]**: 識別碼。特徵：名稱含 ID/No/Code，或數值皆為唯一且無運算意義。 -> **絕對不可作為 Y 軸 (數值)**。
+             - **[CAT]**: 分類維度 (Dimension)。特徵：文字欄位，或 Unique 值很少的數值 (如 1~5 分)。
+             - **[VAL]**: 數值度量 (Measure)。特徵：可加總運算的連續數值 (金額、數量、長度)。
+
+        2. **策略選擇 (Strategy Selection)**:
+           - **Scenario A (有 [TIME])**: 優先產生趨勢圖 (Trend)。X=[TIME], Y=[VAL]。
+           - **Scenario B (無 [TIME])**: 專注於排行 (Ranking) 與佔比 (Composition)。X=[CAT], Y=[VAL]。
+           - **Scenario C (多個 [VAL])**: 產生相關性分析 (Scatter/Combo)。X=[VAL], Y=[VAL] 或 X=[CAT], Y1=[VAL], Y2=[VAL]。
+           - **Scenario D (只有文字)**: 產生計數統計。Y="計數 (Count)"。
+
+        3. **防呆過濾 (Safety Checks)**:
+           - [TIME] 欄位若是數值型 (如 202312)，**禁止**畫直方圖 (Histogram)，必須畫折線圖或長條圖。
+           - [ID] 欄位禁止做數學運算 (Sum/Avg)。
+           - 若 [CAT] 的 Unique 數量 > 50，禁止畫圓餅圖或無篩選的長條圖 (太多條)，建議改用 "Pareto (Top N)" 的概念或不建議該圖。
+        </thinking_process_guidelines>
+
+        <rules>
+        1. **Title**: 繁體中文，精簡有力 (Max 10 字)。例如：「各區營收趨勢」、「產品類別佔比」。不要用「X vs Y」這種懶惰標題。
+        2. **Diversity**: 不要只給一種圖。必須包含 Bar, Line, Pie, Scatter, TreeMap 等不同視角。
+        3. **High Cardinality Handling**: 如果某個分類欄位 (如「門市名稱」) 有幾百個，不要建議用它來做「顏色分組 (color_col)」，會導致圖例爆炸。
+        4. **Logic**: 確保 X 軸與 Y 軸邏輯通順。X 軸通常是維度 ([TIME]/[CAT])，Y 軸是度量 ([VAL])。
+        </rules>
+
+        <output_format>
+        請直接回傳純 JSON Array，格式如下 (不要 Markdown code block，直接 array)：
         [
-            {{
-                "group": "群組 (例如: 趨勢/排行/佔比/交叉)",
-                "title": "極短標題 (Max 10字)",
-                "chart_type": "圖表類型", 
-                "x_col": "X軸欄位",
-                "y_col": "Y軸欄位",
-                "color_col": "顏色欄位(可null)",
-                "sort": "desc/asc/none"
-            }}
+          {{
+            "group": "圖表分類 (趨勢/排行/分佈/佔比/關聯)",
+            "title": "標題 (Max 10字)",
+            "chart_type": "請由以下選擇: [長條圖 (Bar), 折線圖 (Line), 雙軸組合圖 (Combo), 圓餅圖 (Pie), 樹狀圖 (TreeMap), 散佈圖 (Scatter), 箱型圖 (Box Plot), 直方圖 (Histogram), 雷達圖 (Radar)]",
+            "x_col": "欄位名",
+            "y_col": "欄位名",
+            "color_col": "欄位名 (若不適合分組請填 null)",
+            "sort": "desc/asc/none (時間欄位通常填 none)"
+          }}
         ]
-        
-        【可用圖表類型】:
-        "長條圖 (Bar)", "折線圖 (Line)", "雙軸組合圖 (Combo)", "圓餅圖 (Pie)", "樹狀圖 (TreeMap)", 
-        "散佈圖 (Scatter)", "箱型圖 (Box Plot)", "面積圖 (Area)", "直方圖 (Histogram)", "雷達圖 (Radar)"
+        </output_format>
         """
 
         response = model.generate_content(prompt)
         
         json_str = response.text.strip()
+        # 清理可能的回傳格式
         if json_str.startswith("```json"): json_str = json_str[7:]
         if json_str.startswith("```"): json_str = json_str[3:]
         if json_str.endswith("```"): json_str = json_str[:-3]
@@ -172,19 +220,18 @@ def analyze_with_gemini(df, api_key):
 # ==========================================
 def get_manual_content():
     return """
-# 📊 作圖小工具 (V40 完美防呆版) 使用手冊
+# 📊 作圖小工具 (Lyra AI V50 版) 使用手冊
 
-## 1. 🔑 啟動 AI
-1. 前往 Google AI Studio 申請免費 Key。
-2. 貼入左側「🔑 Gemini API Key」欄位並點擊驗證。
+## 核心升級
+此版本搭載 Lyra Prompt Architecture V2，具備以下能力：
+1. **語意偵測**：自動識別「偽裝成數字的日期 (如 202512)」，避免畫出錯誤的直方圖。
+2. **情境分析**：自動判斷是否有時間欄位，若有則優先推薦趨勢圖，若無則推薦排行圖。
+3. **防呆機制**：自動過濾 ID 欄位加總、過多類別的圓餅圖等無效圖表。
 
-## 2. 🤖 智慧分析
-上傳檔案後，AI 會自動生成 20 個精簡標題建議。
-**新功能**：系統會自動過濾掉「太醜」的圖表 (例如線條太多的折線圖)，強制只顯示前 10 名，確保畫面清爽。
-
-## 3. 🛠️ 疑難排解
-* **標題顯示**：已修復標題被切掉的問題。
-* **字體**：建議選擇 "Noto Sans TC" 獲得最佳體驗。
+## 使用步驟
+1. **啟動 AI**：輸入 Google Gemini API Key。
+2. **上傳資料**：支援 CSV 或 Excel。
+3. **點擊分析**：AI 會根據資料特性生成 20 個最佳化圖表按鈕。
 
 祝您分析愉快！
     """
@@ -207,7 +254,8 @@ def generate_demo_excel():
         '銷售金額': np.random.randint(1000, 50000, rows),
         '利潤': np.random.randint(100, 5000, rows),
         '運送天數': np.random.poisson(3, rows),
-        '滿意度': np.random.randint(1, 6, rows)
+        '滿意度': np.random.randint(1, 6, rows),
+        '年月份(數值模擬)': [int(d.strftime('%Y%m')) for d in dates] # 模擬這類容易被誤判的欄位
     })
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
@@ -219,6 +267,7 @@ def load_data(file):
     try:
         if file.name.endswith('.csv'): df = pd.read_csv(file)
         else: df = pd.read_excel(file)
+        # 簡易轉換日期格式
         for col in df.columns:
             if pd.api.types.is_datetime64_any_dtype(df[col]) or '日期' in col or 'Date' in col:
                 try: df[col] = pd.to_datetime(df[col])
@@ -231,7 +280,7 @@ def load_data(file):
 # ==========================================
 # 4. 主介面開始
 # ==========================================
-st.title("✨ 作圖小工具 (Gemini AI版)")
+st.title("✨ 作圖小工具 (Lyra AI版)")
 
 with st.sidebar:
     st.header("1. 資料來源")
@@ -273,6 +322,7 @@ if uploaded_files:
     df = load_data(current_file)
     
     if df is not None:
+        # 時間欄位處理
         date_cols = [c for c in df.columns if pd.api.types.is_datetime64_any_dtype(df[c])]
         if date_cols:
             with st.sidebar:
@@ -295,11 +345,11 @@ if uploaded_files:
         sort_orders_list = ["預設 (依 X 軸)", "數值由大到小 (Desc)", "數值由小到大 (Asc)"]
 
         st.markdown("---")
-        st.subheader("🤖 Gemini 智慧分析建議 (20+ Insights)")
+        st.subheader("🤖 Lyra AI 戰略分析建議 (Semantic Analysis)")
         
         if st.session_state['gemini_api_key']:
             if 'last_analyzed_file' not in st.session_state or st.session_state['last_analyzed_file'] != selected_file_name:
-                with st.spinner("🤖 AI 正在生成精簡分析建議..."):
+                with st.spinner("🧠 Lyra 正在解析數據語意與商業邏輯..."):
                     insights, error_msg = analyze_with_gemini(df, st.session_state['gemini_api_key'])
                     if error_msg:
                         st.error(error_msg)
@@ -343,11 +393,10 @@ if uploaded_files:
                                 sync_box('y_col_idx', 'y_col_box', num_cols, insight.get('y_col'))
                                 sync_box('y_col_2_idx', 'y_col_2_box', num_cols, insight.get('y_col')) 
                                 
-                                # [修正點 3] 顏色分組防呆機制
+                                # 顏色分組防呆
                                 target_color = insight.get('color_col')
-                                # 如果 AI 建議了顏色，但該欄位 Unique > 10，強制設為 無
                                 if target_color and target_color in df.columns:
-                                    if df[target_color].nunique() > 10 and "折線圖" in c_type:
+                                    if df[target_color].nunique() > 20 and "折線圖" in c_type:
                                         target_color = None
                                         st.toast(f"⚠️ 為了圖表可讀性，已自動隱藏 '{insight.get('color_col')}' 的顏色分組 (太多類別)", icon="🛡️")
                                 
@@ -359,9 +408,9 @@ if uploaded_files:
 
                                 st.rerun()
         else:
-            st.warning("請輸入 API Key 以啟用智慧分析。")
+            st.warning("請輸入 API Key 以啟用 Lyra 智慧分析。")
 
-        # === 側邊欄與繪圖設定 (維持 V35.1 修復版) ===
+        # === 側邊欄與繪圖設定 ===
         with st.sidebar:
             st.markdown("---")
             st.header("2. 繪圖設定")
