@@ -34,9 +34,9 @@ for key, value in default_states.items():
         st.session_state[key] = value
 
 # ==========================================
-# 1. 全域設定與 CSS
+# 1. 全域設定與 CSS (V90 Layout Update)
 # ==========================================
-st.set_page_config(page_title="作圖小工具 V70 (Lyra Architect)", layout="wide", page_icon="✨")
+st.set_page_config(page_title="作圖小工具 V90 (Lyra Dashboard)", layout="wide", page_icon="✨")
 
 def inject_custom_css(font_family):
     google_font_import = ""
@@ -52,6 +52,8 @@ def inject_custom_css(font_family):
         {google_font_import}
         html, body, [class*="css"] {{ font-family: {font_css_rule} !important; }}
         .stDownloadButton button {{ width: 100%; border-color: #4CAF50; color: #4CAF50; }}
+        
+        /* 按鈕樣式 */
         div.stButton > button {{
             width: 100%; min-height: 45px; height: 100%; white-space: normal; word-wrap: break-word;
             padding: 4px 6px; line-height: 1.2; border-radius: 4px; border: 1px solid #ddd;
@@ -63,18 +65,33 @@ def inject_custom_css(font_family):
             border-color: #7c4dff; color: #7c4dff; background-color: #f8f5ff;
             transform: translateY(-1px); z-index: 1;
         }}
+        
         .group-header {{
             font-weight: 700; font-size: 0.9rem; color: #666;
             margin-top: 15px; margin-bottom: 5px; padding-bottom: 2px;
             border-bottom: 1px solid #eee;
             font-family: {font_css_rule} !important;
         }}
-        .block-container {{ padding-top: 3.5rem; }}
+        
+        /* [Lyra V90 CSS] 讓圖表區塊變成 Sticky Header */
+        .chart-sticky-container {{
+            position: sticky;
+            top: 2.8rem; /* 預留 Streamlit 頂部 Header 的高度 */
+            z-index: 999;
+            background-color: rgba(255, 255, 255, 0.95); /* 白色背景防止下方內容穿透 */
+            padding-bottom: 10px;
+            padding-top: 10px;
+            border-bottom: 2px solid #f0f2f6;
+            margin-bottom: 20px;
+            backdrop-filter: blur(5px);
+        }}
+        
+        .block-container {{ padding-top: 3rem; }}
     </style>
     """, unsafe_allow_html=True)
 
 # ==========================================
-# 2. 核心功能：Gemini AI 分析引擎 (Lyra V70)
+# 2. 核心功能：Gemini AI 分析引擎
 # ==========================================
 
 def get_valid_model():
@@ -97,7 +114,7 @@ def analyze_with_gemini(df, api_key):
         model_name = get_valid_model()
         model = genai.GenerativeModel(model_name)
 
-        # --- [Lyra Detective] 資料掃描 ---
+        # --- [Lyra Detective] ---
         stats_info = {}
         for col in df.columns:
             n_unique = df[col].nunique()
@@ -128,10 +145,10 @@ def analyze_with_gemini(df, api_key):
 
         columns_summary = json.dumps(stats_info, ensure_ascii=False, indent=2)
         
-        # --- [Lyra Architect Prompt] 強制圖表多樣性 ---
+        # --- [Lyra Architect Prompt] ---
         prompt = f"""
         <role>
-        你是一位數據視覺化架構師。我們需要你根據數據特性，嚴格按照圖表類型的適用性，分配不同的分析任務。
+        你是一位數據視覺化架構師。請根據數據特性，分配不同的分析任務，挖掘多維度 Insight。
         </role>
 
         <data_profile>
@@ -139,25 +156,19 @@ def analyze_with_gemini(df, api_key):
         </data_profile>
 
         <chart_catalog>
-        請務必使用以下標準名稱 (括號內為關鍵字)：
-        1. [AGG] 聚合類 (需計算總和/平均): "長條圖 (Bar)", "折線圖 (Line)", "面積圖 (Area)", "圓餅圖 (Pie)", "樹狀圖 (TreeMap)", "雷達圖 (Radar)", "漏斗圖 (Funnel)"
-        2. [RAW] 原始分佈類 (不需計算): "直方圖 (Histogram)", "箱型圖 (Box Plot)", "散佈圖 (Scatter)"
+        標準名稱 (請嚴格遵守):
+        1. [AGG] 聚合類: "長條圖 (Bar)", "折線圖 (Line)", "面積圖 (Area)", "圓餅圖 (Pie)", "樹狀圖 (TreeMap)", "雷達圖 (Radar)", "漏斗圖 (Funnel)"
+        2. [RAW] 原始分佈類: "直方圖 (Histogram)", "箱型圖 (Box Plot)", "散佈圖 (Scatter)"
         3. [CPLX] 複雜類: "雙軸組合圖 (Combo)"
         </chart_catalog>
 
         <mandatory_requirements>
         請生成 **20 個** 建議，且必須滿足以下配額 (Diversity Quota)：
-        1. **至少 2 個 "箱型圖 (Box Plot)"**: 用於分析數值欄位 ([VAL]) 的分佈與離群值 (例如：良率分佈、單價分佈)。
-        2. **至少 2 個 "散佈圖 (Scatter)"**: 用於尋找兩個數值欄位之間的關聯 (例如：價格 vs 銷量)。
-        3. **至少 1 個 "雷達圖 (Radar)"**: 如果有多個評分類欄位。
-        4. **時間欄位必備**: 遇到 `TIME_SERIES`，必須出 "折線圖" 或 "面積圖"。
+        1. **至少 2 個 "箱型圖 (Box Plot)"**: 用於分析數值分佈與離群值。
+        2. **至少 2 個 "散佈圖 (Scatter)"**: 用於尋找變數關聯。
+        3. **時間序列必備**: 遇到 `TIME_SERIES`，必須出 "折線圖" 或 "面積圖"。
+        4. **高基數處理**: 若分類 > 50 種，建議 "長條圖 (Bar)" 並標註 (Top 10)。
         </mandatory_requirements>
-
-        <strategy_matrix>
-        - **數值分佈 (Distribution)**: 不要只給直方圖，箱型圖往往能看到更多 Insight (中位數/四分位距)。
-        - **類別比較**: 若類別很多 (>10)，優先選長條圖 (Bar)；若類別少，選圓餅圖 (Pie)。
-        - **高基數處理**: 若某分類有 >50 種值，請在標題加上 "(Top 10)"。
-        </strategy_matrix>
 
         <output_format>
         回傳純 JSON Array:
@@ -192,11 +203,10 @@ def analyze_with_gemini(df, api_key):
 # ==========================================
 def get_manual_content():
     return """
-# 📊 作圖小工具 V70 (Lyra Architect)
-## 核心修復
-1. **箱型圖/散佈圖修復**：修正了因為數據被加總而無法顯示分佈的問題。現在能正確顯示中位數與離群值。
-2. **圖表多樣性保證**：強制 AI 建議箱型圖與散佈圖，不再只有長條圖。
-3. **模糊匹配**：即使 AI 回傳的圖表名稱有小誤差，系統也能自動修正對應。
+# 📊 作圖小工具 V90 (Lyra Dashboard)
+## 介面更新
+1. **儀表板佈局**：圖表現已固定在畫面最上方 (Sticky Header)，瀏覽分析建議時圖表不會消失。
+2. **操作優化**：下方按鈕區可無限捲動，點擊後上方圖表即時更新。
     """
 
 @st.cache_data
@@ -210,13 +220,12 @@ def generate_demo_excel():
         '產品線': [random.choice(['旗艦機', '中階機', '入門機']) for _ in range(rows)],
         '區域': [random.choice(['北區', '中區', '南區', '東區']) for _ in range(rows)],
         '客戶滿意度': np.random.randint(1, 10, rows),
-        '產品評分': np.random.normal(7, 1.5, rows).clip(1, 10), # 常態分佈，適合箱型圖
+        '產品評分': np.random.normal(7, 1.5, rows).clip(1, 10), 
         '物流評分': np.random.normal(8, 1, rows).clip(1, 10),
         '單價': np.random.randint(5000, 30000, rows),
         '銷量': np.random.randint(1, 50, rows),
         '折扣率': np.random.uniform(0.8, 1.0, rows)
     })
-    # 製造一些極端值讓箱型圖更有趣
     df.loc[0:10, '單價'] = 80000 
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
@@ -240,7 +249,7 @@ def load_data(file):
 # ==========================================
 # 4. 主介面
 # ==========================================
-st.title("✨ 作圖小工具 (Lyra V70)")
+st.title("✨ 作圖小工具 (Lyra V90)")
 
 with st.sidebar:
     st.header("1. 資料來源")
@@ -256,7 +265,7 @@ with st.sidebar:
 
     st.markdown("---")
     with st.expander("📥 範例資料 (含離群值)"):
-        if st.button("🎲 生成 V70 測試資料"):
+        if st.button("🎲 生成 V90 測試資料"):
             st.download_button("📊 下載 Excel", generate_demo_excel(), "Demo_Data.xlsx")
 
     font_choice = st.selectbox("字體", ["Noto Sans TC (推薦)", "Microsoft JhengHei", "Arial"], index=0)
@@ -266,14 +275,11 @@ with st.sidebar:
 df = None
 all_cols, num_cols, cat_cols = [], [], []
 
-# 定義標準圖表清單 (用於模糊匹配與 UI)
 CHART_TYPES = [
     "長條圖 (Bar)", "折線圖 (Line)", "雙軸組合圖 (Combo)", "圓餅圖 (Pie)", 
     "樹狀圖 (TreeMap)", "散佈圖 (Scatter)", "箱型圖 (Box Plot)", 
     "直方圖 (Histogram)", "雷達圖 (Radar)", "面積圖 (Area)", "漏斗圖 (Funnel)"
 ]
-
-# 定義哪些圖表需要「原始資料」不要 GroupBy
 RAW_DATA_CHARTS = ["箱型圖 (Box Plot)", "直方圖 (Histogram)", "散佈圖 (Scatter)"]
 
 if uploaded_files:
@@ -282,7 +288,7 @@ if uploaded_files:
     df = load_data(file_map[selected_file_name])
     
     if df is not None:
-        # 時間粒度 (略)
+        # 時間粒度
         date_cols = [c for c in df.columns if pd.api.types.is_datetime64_any_dtype(df[c])]
         for col in date_cols:
             df[f"{col}(YM)"] = df[col].dt.strftime('%Y-%m')
@@ -292,13 +298,127 @@ if uploaded_files:
         all_cols = df.columns.tolist()
         agg_funcs_list = ["總和 (Sum)", "平均 (Avg)", "最大值 (Max)", "計數 (Count)"]
         
-        # --- AI 分析區塊 ---
+        # --- 繪圖設定區 (Sidebar) ---
+        with st.sidebar:
+            st.markdown("---")
+            st.header("2. 繪圖設定")
+            chart_type = st.selectbox("圖表類型", CHART_TYPES, index=st.session_state['chart_type_idx'], key='chart_type_box')
+            
+            # UI logic
+            if chart_type == "雙軸組合圖 (Combo)":
+                x_col = st.selectbox("X 軸", all_cols, index=st.session_state['x_col_idx'], key='x_col_box')
+                y_col = st.selectbox("左軸數值", num_cols, index=st.session_state['y_col_idx'], key='y_col_box')
+                y_col_2 = st.selectbox("右軸數值", num_cols, index=st.session_state['y_col_2_idx'], key='y_col_2_box')
+                agg_func = st.selectbox("計算", agg_funcs_list, index=st.session_state['agg_func_idx'], key='agg_func_box')
+                color_col = st.selectbox("分組", ["(無)"] + all_cols, index=st.session_state['color_col_idx'], key='color_col_box')
+            elif chart_type == "樹狀圖 (TreeMap)":
+                default_tree_path = st.session_state['treemap_path'] if st.session_state['treemap_path'] else (cat_cols[:2] if len(cat_cols)>=2 else cat_cols[:1])
+                treemap_path = st.multiselect("層級結構", cat_cols, default=default_tree_path, key='treemap_box')
+                y_col = st.selectbox("數值大小", num_cols, index=st.session_state['y_col_idx'], key='y_col_box')
+                color_col = st.selectbox("顏色依據", ["(無)"] + num_cols + cat_cols, index=st.session_state['color_col_idx'], key='color_col_box')
+                agg_func = st.selectbox("計算", agg_funcs_list, index=st.session_state['agg_func_idx'], key='agg_func_box')
+            elif chart_type == "雷達圖 (Radar)":
+                x_col = st.selectbox("維度 (Label)", cat_cols, index=st.session_state['x_col_idx'], key='x_col_box')
+                y_col = st.selectbox("數值 (Value)", num_cols, index=st.session_state['y_col_idx'], key='y_col_box')
+                color_col = st.selectbox("分組", ["(無)"] + all_cols, index=st.session_state['color_col_idx'], key='color_col_box')
+                agg_func = st.selectbox("計算", agg_funcs_list, index=st.session_state['agg_func_idx'], key='agg_func_box')
+            else:
+                x_col = st.selectbox("X 軸", all_cols, index=st.session_state['x_col_idx'], key='x_col_box')
+                y_col = st.selectbox("Y 軸 (數值)", num_cols, index=st.session_state['y_col_idx'], key='y_col_box')
+                agg_func = st.selectbox("計算", agg_funcs_list, index=st.session_state['agg_func_idx'], key='agg_func_box')
+                color_col = st.selectbox("分組", ["(無)"] + all_cols, index=st.session_state['color_col_idx'], key='color_col_box')
+
+        # =========================================================
+        # 🚀 [Lyra V90 Layout] 圖表優先渲染區塊 (Sticky Header)
+        # =========================================================
+        
+        # 建立一個 Sticky 的容器
+        st.markdown('<div class="chart-sticky-container">', unsafe_allow_html=True)
+        
+        if df is not None:
+            try:
+                agg_map = {"總和 (Sum)": "sum", "平均 (Avg)": "mean", "最大值 (Max)": "max", "計數 (Count)": "count"}
+                real_agg = agg_map[agg_func]
+                
+                use_raw_data = chart_type in RAW_DATA_CHARTS
+                
+                if use_raw_data:
+                    df_agg = df.copy()
+                else:
+                    if chart_type == "雙軸組合圖 (Combo)":
+                         grp_cols = [x_col]
+                         if color_col != "(無)": grp_cols.append(color_col)
+                         df_agg = df.groupby(grp_cols, as_index=False)[[y_col, y_col_2]].agg(real_agg)
+                    elif chart_type == "樹狀圖 (TreeMap)":
+                         if not treemap_path: df_agg = None
+                         else: df_agg = df.groupby(treemap_path, as_index=False)[y_col].agg(real_agg)
+                    elif chart_type == "雷達圖 (Radar)":
+                         grp_cols = [x_col]
+                         if color_col != "(無)": grp_cols.append(color_col)
+                         df_agg = df.groupby(grp_cols, as_index=False)[y_col].agg(real_agg)
+                    else:
+                        grp_cols = [x_col]
+                        if color_col != "(無)": grp_cols.append(color_col)
+                        df_agg = df.groupby(grp_cols, as_index=False)[y_col].agg(real_agg)
+
+                    # X 軸轉字串
+                    if df_agg is not None and x_col in df_agg.columns and pd.api.types.is_numeric_dtype(df_agg[x_col]):
+                        col_mean = df_agg[x_col].mean()
+                        if (1900 < col_mean < 2100) or (190000 < col_mean < 210012):
+                            df_agg[x_col] = df_agg[x_col].astype(str)
+
+                # 時序鎖定 (V80 Feature)
+                if chart_type in ["折線圖 (Line)", "面積圖 (Area)"] and df_agg is not None:
+                    df_agg = df_agg.sort_values(by=x_col, ascending=True)
+                elif not use_raw_data and df_agg is not None and chart_type not in ["樹狀圖 (TreeMap)", "雷達圖 (Radar)"]:
+                    sort_idx = st.session_state['sort_order_idx']
+                    if sort_idx == 1: df_agg = df_agg.sort_values(by=y_col, ascending=False)
+                    elif sort_idx == 2: df_agg = df_agg.sort_values(by=y_col, ascending=True)
+
+                # 繪圖
+                if df_agg is not None:
+                    fig = None
+                    common_params = {"data_frame": df_agg, "x": x_col if x_col in df_agg.columns else None, "title": f"{chart_type}: {x_col if x_col else ''}"}
+                    if color_col != "(無)" and color_col in df_agg.columns: common_params["color"] = color_col
+
+                    if chart_type == "長條圖 (Bar)": fig = px.bar(**common_params, y=y_col, text_auto='.2s')
+                    elif chart_type == "折線圖 (Line)": fig = px.line(**common_params, y=y_col, markers=True)
+                    elif chart_type == "面積圖 (Area)": fig = px.area(**common_params, y=y_col)
+                    elif chart_type == "漏斗圖 (Funnel)": fig = px.funnel(**common_params, y=y_col)
+                    elif chart_type == "雙軸組合圖 (Combo)":
+                        fig = make_subplots(specs=[[{"secondary_y": True}]])
+                        fig.add_trace(go.Bar(x=df_agg[x_col], y=df_agg[y_col], name=y_col, marker_color='#636EFA', opacity=0.8), secondary_y=False)
+                        fig.add_trace(go.Scatter(x=df_agg[x_col], y=df_agg[y_col_2], name=y_col_2, mode='lines+markers', line=dict(color='#EF553B', width=3)), secondary_y=True)
+                        fig.update_layout(title=f"{y_col} vs {y_col_2}")
+                    elif chart_type == "圓餅圖 (Pie)": fig = px.pie(df_agg, values=y_col, names=x_col, title=f"{x_col} 佔比")
+                    elif chart_type == "樹狀圖 (TreeMap)": fig = px.treemap(df_agg, path=treemap_path, values=y_col, color=color_col if color_col!="(無)" else y_col, title="層級分析")
+                    elif chart_type == "雷達圖 (Radar)":
+                         fig = px.line_polar(df_agg, r=y_col, theta=x_col, line_close=True, color=color_col if color_col != "(無)" else None, title="雷達分析")
+                         fig.update_traces(fill='toself')
+                    elif chart_type == "直方圖 (Histogram)": fig = px.histogram(df_agg, x=x_col, color=color_col if color_col!="(無)" else None, title=f"{x_col} 分佈")
+                    elif chart_type == "箱型圖 (Box Plot)": fig = px.box(df_agg, x=x_col, y=y_col, color=color_col if color_col!="(無)" else None, title=f"{y_col} 分佈 (by {x_col})")
+                    elif chart_type == "散佈圖 (Scatter)": fig = px.scatter(df_agg, x=x_col, y=y_col, color=color_col if color_col!="(無)" else None, title=f"{x_col} vs {y_col}")
+
+                    if fig:
+                        fig.update_layout(template="plotly_white", height=600, font=dict(family=font_choice.split(',')[0].strip("'"), size=16), hovermode="x unified")
+                        st.plotly_chart(fig, use_container_width=True)
+
+            except Exception as e:
+                st.error(f"繪圖錯誤: {e}")
+        
+        st.markdown('</div>', unsafe_allow_html=True) 
+        # End of Sticky Container
+
+        # =========================================================
+        # 🚀 [Lyra V90 Layout] AI 分析按鈕區塊 (位於圖表下方，可捲動)
+        # =========================================================
+        
         st.markdown("---")
         st.subheader("🤖 Lyra 深度分析建議")
         
         if st.session_state['gemini_api_key']:
             if 'last_analyzed_file' not in st.session_state or st.session_state['last_analyzed_file'] != selected_file_name:
-                with st.spinner("🧠 正在構建分析矩陣 (分佈/關聯/趨勢)..."):
+                with st.spinner("🧠 正在構建分析矩陣..."):
                     insights, error_msg = analyze_with_gemini(df, st.session_state['gemini_api_key'])
                     if not error_msg:
                         st.session_state['ai_insights'] = insights
@@ -314,12 +434,11 @@ if uploaded_files:
                     for i, insight in enumerate(group_insights):
                         with cols[i % 7]:
                             if st.button(insight['title'], key=f"btn_{group_name}_{i}"):
-                                # [Lyra Fix] 模糊匹配邏輯
+                                # 模糊匹配
                                 raw_type = insight.get('chart_type', '')
-                                matched_type = "長條圖 (Bar)" # Default
+                                matched_type = "長條圖 (Bar)"
                                 for standard_type in CHART_TYPES:
-                                    # 只要 AI 回傳的字串包含關鍵字 (如 "Box" or "箱型") 就視為命中
-                                    keywords = standard_type.split(' ') # ["箱型圖", "(Box", "Plot)"]
+                                    keywords = standard_type.split(' ')
                                     if any(k.strip("()") in raw_type for k in keywords if len(k)>2):
                                         matched_type = standard_type
                                         break
@@ -345,128 +464,3 @@ if uploaded_files:
                                      st.session_state['treemap_box'] = [insight.get('x_col')]
                                 
                                 st.rerun()
-
-        # --- 繪圖設定區 ---
-        with st.sidebar:
-            st.markdown("---")
-            st.header("2. 繪圖設定")
-            chart_type = st.selectbox("圖表類型", CHART_TYPES, index=st.session_state['chart_type_idx'], key='chart_type_box')
-            
-            # UI 邏輯
-            if chart_type == "雙軸組合圖 (Combo)":
-                x_col = st.selectbox("X 軸", all_cols, index=st.session_state['x_col_idx'], key='x_col_box')
-                y_col = st.selectbox("左軸數值", num_cols, index=st.session_state['y_col_idx'], key='y_col_box')
-                y_col_2 = st.selectbox("右軸數值", num_cols, index=st.session_state['y_col_2_idx'], key='y_col_2_box')
-                agg_func = st.selectbox("計算", agg_funcs_list, index=st.session_state['agg_func_idx'], key='agg_func_box')
-                color_col = st.selectbox("分組", ["(無)"] + all_cols, index=st.session_state['color_col_idx'], key='color_col_box')
-            elif chart_type == "樹狀圖 (TreeMap)":
-                default_tree_path = st.session_state['treemap_path'] if st.session_state['treemap_path'] else (cat_cols[:2] if len(cat_cols)>=2 else cat_cols[:1])
-                treemap_path = st.multiselect("層級結構", cat_cols, default=default_tree_path, key='treemap_box')
-                y_col = st.selectbox("數值大小", num_cols, index=st.session_state['y_col_idx'], key='y_col_box')
-                color_col = st.selectbox("顏色依據", ["(無)"] + num_cols + cat_cols, index=st.session_state['color_col_idx'], key='color_col_box')
-                agg_func = st.selectbox("計算", agg_funcs_list, index=st.session_state['agg_func_idx'], key='agg_func_box')
-            elif chart_type == "雷達圖 (Radar)":
-                x_col = st.selectbox("維度 (Label)", cat_cols, index=st.session_state['x_col_idx'], key='x_col_box')
-                y_col = st.selectbox("數值 (Value)", num_cols, index=st.session_state['y_col_idx'], key='y_col_box')
-                color_col = st.selectbox("分組", ["(無)"] + all_cols, index=st.session_state['color_col_idx'], key='color_col_box')
-                agg_func = st.selectbox("計算", agg_funcs_list, index=st.session_state['agg_func_idx'], key='agg_func_box')
-            else:
-                x_col = st.selectbox("X 軸", all_cols, index=st.session_state['x_col_idx'], key='x_col_box')
-                y_col = st.selectbox("Y 軸 (數值)", num_cols, index=st.session_state['y_col_idx'], key='y_col_box')
-                # 對於箱型圖，雖然UI顯示計算方式，但實際邏輯會忽略它(因為要用原始資料)
-                agg_func = st.selectbox("計算", agg_funcs_list, index=st.session_state['agg_func_idx'], key='agg_func_box')
-                color_col = st.selectbox("分組", ["(無)"] + all_cols, index=st.session_state['color_col_idx'], key='color_col_box')
-
-        # --- [Lyra Rendering Engine V70] 智慧數據分流 ---
-        if df is not None:
-            try:
-                agg_map = {"總和 (Sum)": "sum", "平均 (Avg)": "mean", "最大值 (Max)": "max", "計數 (Count)": "count"}
-                real_agg = agg_map[agg_func]
-                
-                # [Lyra Logic] 數據分流：原始資料 vs 聚合資料
-                use_raw_data = chart_type in RAW_DATA_CHARTS
-                
-                if use_raw_data:
-                    # 不做 GroupBy，直接用 df
-                    df_agg = df.copy()
-                    if chart_type == "直方圖 (Histogram)":
-                        # 直方圖 X 軸如果是日期，不用轉型，Plotly 會處理
-                        pass
-                else:
-                    # 需要 GroupBy
-                    if chart_type == "雙軸組合圖 (Combo)":
-                         grp_cols = [x_col]
-                         if color_col != "(無)": grp_cols.append(color_col)
-                         df_agg = df.groupby(grp_cols, as_index=False)[[y_col, y_col_2]].agg(real_agg)
-                    elif chart_type == "樹狀圖 (TreeMap)":
-                         if not treemap_path: 
-                             df_agg = None
-                         else:
-                             df_agg = df.groupby(treemap_path, as_index=False)[y_col].agg(real_agg)
-                    elif chart_type == "雷達圖 (Radar)":
-                         grp_cols = [x_col]
-                         if color_col != "(無)": grp_cols.append(color_col)
-                         df_agg = df.groupby(grp_cols, as_index=False)[y_col].agg(real_agg)
-                    else:
-                        grp_cols = [x_col]
-                        if color_col != "(無)": grp_cols.append(color_col)
-                        df_agg = df.groupby(grp_cols, as_index=False)[y_col].agg(real_agg)
-
-                    # [Lyra Logic] 只有在聚合模式下，才需要處理 X 軸數值轉型 (避免斷層)
-                    # 因為散佈圖/箱型圖通常就是看連續數值，不需要轉成字串
-                    if df_agg is not None and x_col in df_agg.columns and pd.api.types.is_numeric_dtype(df_agg[x_col]):
-                        col_mean = df_agg[x_col].mean()
-                        if (1900 < col_mean < 2100) or (190000 < col_mean < 210012):
-                            df_agg[x_col] = df_agg[x_col].astype(str)
-
-                # 排序 (僅針對 Bar/Line 等聚合圖表)
-                if not use_raw_data and df_agg is not None and chart_type not in ["樹狀圖 (TreeMap)", "雷達圖 (Radar)"]:
-                    sort_idx = st.session_state['sort_order_idx']
-                    if sort_idx == 1: df_agg = df_agg.sort_values(by=y_col, ascending=False)
-                    elif sort_idx == 2: df_agg = df_agg.sort_values(by=y_col, ascending=True)
-
-                # 開始繪圖
-                if df_agg is not None:
-                    fig = None
-                    # 設定通用參數
-                    common_params = {"data_frame": df_agg, "x": x_col if x_col in df_agg.columns else None, "title": f"{chart_type}: {x_col if x_col else ''}"}
-                    if color_col != "(無)" and color_col in df_agg.columns: common_params["color"] = color_col
-
-                    # === 分流繪圖邏輯 ===
-                    if chart_type == "長條圖 (Bar)":
-                        fig = px.bar(**common_params, y=y_col, text_auto='.2s')
-                    elif chart_type == "折線圖 (Line)":
-                        fig = px.line(**common_params, y=y_col, markers=True)
-                    elif chart_type == "面積圖 (Area)":
-                        fig = px.area(**common_params, y=y_col)
-                    elif chart_type == "漏斗圖 (Funnel)":
-                        fig = px.funnel(**common_params, y=y_col)
-                    elif chart_type == "雙軸組合圖 (Combo)":
-                        fig = make_subplots(specs=[[{"secondary_y": True}]])
-                        fig.add_trace(go.Bar(x=df_agg[x_col], y=df_agg[y_col], name=y_col, marker_color='#636EFA', opacity=0.8), secondary_y=False)
-                        fig.add_trace(go.Scatter(x=df_agg[x_col], y=df_agg[y_col_2], name=y_col_2, mode='lines+markers', line=dict(color='#EF553B', width=3)), secondary_y=True)
-                        fig.update_layout(title=f"{y_col} vs {y_col_2}")
-                    elif chart_type == "圓餅圖 (Pie)":
-                        fig = px.pie(df_agg, values=y_col, names=x_col, title=f"{x_col} 佔比")
-                    elif chart_type == "樹狀圖 (TreeMap)":
-                        fig = px.treemap(df_agg, path=treemap_path, values=y_col, color=color_col if color_col!="(無)" else y_col, title="層級分析")
-                    elif chart_type == "雷達圖 (Radar)":
-                         fig = px.line_polar(df_agg, r=y_col, theta=x_col, line_close=True, color=color_col if color_col != "(無)" else None, title="雷達分析")
-                         fig.update_traces(fill='toself')
-                    
-                    # === 原始數據圖表 ===
-                    elif chart_type == "直方圖 (Histogram)":
-                        # 直方圖特殊處理: 僅需 X (分佈)
-                        fig = px.histogram(df_agg, x=x_col, color=color_col if color_col!="(無)" else None, title=f"{x_col} 分佈")
-                    elif chart_type == "箱型圖 (Box Plot)":
-                        # 箱型圖關鍵：X 是分組(可選)，Y 是數值(必須)
-                        fig = px.box(df_agg, x=x_col, y=y_col, color=color_col if color_col!="(無)" else None, title=f"{y_col} 分佈 (by {x_col})")
-                    elif chart_type == "散佈圖 (Scatter)":
-                        fig = px.scatter(df_agg, x=x_col, y=y_col, color=color_col if color_col!="(無)" else None, title=f"{x_col} vs {y_col}")
-
-                    if fig:
-                        fig.update_layout(template="plotly_white", height=600, font=dict(family=font_choice.split(',')[0].strip("'"), size=16), hovermode="x unified")
-                        st.plotly_chart(fig, use_container_width=True)
-
-            except Exception as e:
-                st.error(f"繪圖錯誤: {e}")
