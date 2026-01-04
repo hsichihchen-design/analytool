@@ -19,7 +19,6 @@ default_states = {
     'y_col_idx': 0,
     'y_col_2_idx': 0,
     'color_col_idx': 0,
-    'facet_col_idx': 0,
     'agg_func_idx': 0,
     'sort_order_idx': 0,
     'treemap_path': [],
@@ -33,9 +32,9 @@ for key, value in default_states.items():
         st.session_state[key] = value
 
 # ==========================================
-# 1. 全域設定與 CSS (V100 Cockpit Layout)
+# 1. 全域設定與 CSS (V110 穩定版)
 # ==========================================
-st.set_page_config(page_title="作圖小工具 V100 (Lyra Cockpit)", layout="wide", page_icon="✨")
+st.set_page_config(page_title="作圖小工具 V110", layout="wide", page_icon="✨")
 
 def inject_custom_css(font_family):
     google_font_import = ""
@@ -51,9 +50,7 @@ def inject_custom_css(font_family):
         {google_font_import}
         html, body, [class*="css"] {{ font-family: {font_css_rule} !important; }}
         
-        /* 隱藏預設的 Header 留白，讓圖表更貼頂 */
-        .block-container {{ padding-top: 1.5rem; padding-bottom: 1rem; }}
-        
+        /* 移除激進的頂部留白調整，避免標題被遮擋 */
         /* 按鈕樣式優化 */
         div.stButton > button {{
             width: 100%; min-height: 50px; height: 100%; 
@@ -102,7 +99,6 @@ def analyze_with_gemini(df, api_key):
         genai.configure(api_key=api_key)
         model = genai.GenerativeModel(get_valid_model())
 
-        # 資料特徵掃描
         stats_info = {}
         for col in df.columns:
             n_unique = df[col].nunique()
@@ -116,7 +112,8 @@ def analyze_with_gemini(df, api_key):
                     if (c_min > 190000 and c_max < 210012) or (c_min > 1900 and c_max < 2050 and n_unique < 50):
                         col_profile["hint"] = "TIME"
                 except: pass
-            col_profile["samples"] = df[col].dropna().astype(str).sample(min(5, len(df))).tolist()
+            try: col_profile["samples"] = df[col].dropna().astype(str).sample(min(5, len(df))).tolist()
+            except: col_profile["samples"] = []
             stats_info[col] = col_profile
 
         summary = json.dumps(stats_info, ensure_ascii=False, indent=2)
@@ -181,9 +178,9 @@ def load_data(file):
     except: return None
 
 # ==========================================
-# 4. 主介面 (V100 駕駛艙佈局)
+# 4. 主介面 (V110 穩定版)
 # ==========================================
-st.title("✨ 作圖小工具 (Lyra V100)")
+st.title("✨ 作圖小工具 (Lyra V110)")
 
 # --- Sidebar ---
 with st.sidebar:
@@ -193,7 +190,7 @@ with st.sidebar:
         if st.session_state['gemini_api_key']: st.success("已連線")
     
     st.markdown("---")
-    if st.button("🎲 生成 V100 測試資料"):
+    if st.button("🎲 生成 V110 測試資料"):
         st.download_button("📊 下載 Excel", generate_demo_excel(), "Demo_Data.xlsx")
     
     font_choice = st.selectbox("字體", ["Noto Sans TC (推薦)", "Microsoft JhengHei", "Arial"], index=0)
@@ -221,7 +218,6 @@ if uploaded_files:
             st.header("2. 繪圖設定")
             chart_type = st.selectbox("圖表類型", CHART_TYPES, index=st.session_state['chart_type_idx'], key='chart_type_box')
             
-            # 簡化設定邏輯 (自動切換)
             if chart_type == "雙軸組合圖 (Combo)":
                 x_col = st.selectbox("X 軸", all_cols, index=st.session_state['x_col_idx'], key='x_col_box')
                 y_col = st.selectbox("左軸數值", num_cols, index=st.session_state['y_col_idx'], key='y_col_box')
@@ -240,7 +236,7 @@ if uploaded_files:
             agg_func = st.selectbox("計算", agg_funcs_list, index=st.session_state['agg_func_idx'], key='agg_func_box')
 
         # =========================================================
-        # 🚀 [Lyra V100] 駕駛艙佈局：圖表區 (固定在最上方)
+        # 🚀 [Lyra V110] 穩定駕駛艙佈局：圖表區
         # =========================================================
         
         # 1. 計算數據 (Data Engine)
@@ -297,13 +293,13 @@ if uploaded_files:
             except Exception as e: st.error(f"繪圖錯誤: {e}")
 
         # =========================================================
-        # 🚀 [Lyra V100] 控制台區 (獨立捲動視窗)
+        # 🚀 [Lyra V110] 獨立捲動控制台 (Stable)
         # =========================================================
         st.markdown("---")
         st.subheader("🤖 AI 戰略分析面板")
-        st.caption("👇 在此處捲動挑選分析視角，上方圖表將即時連動 (不會跑掉)")
+        st.caption("👇 在此處捲動挑選，上方圖表不會跑掉")
 
-        # 使用 Streamlit 的 container 並設定固定高度 -> 這就是不用 Scroll 頁面的關鍵
+        # 使用固定高度容器，這就是「不需要捲動網頁」的關鍵
         with st.container(height=450):
             if st.session_state['gemini_api_key']:
                 if 'last_analyzed_file' not in st.session_state or st.session_state['last_analyzed_file'] != selected_file_name:
@@ -319,23 +315,21 @@ if uploaded_files:
                     
                     for group_name in groups:
                         st.markdown(f"<div class='group-header'>{group_name}</div>", unsafe_allow_html=True)
-                        # 這裡的按鈕無論怎麼生，都被限制在 container(height=450) 裡面
                         cols = st.columns(5)
                         group_insights = [ins for ins in insights if ins['group'] == group_name]
                         for i, insight in enumerate(group_insights):
                             with cols[i % 5]:
                                 if st.button(f"📊 {insight['title']}", key=f"btn_{group_name}_{i}", use_container_width=True):
-                                    # 模糊匹配圖表類型
                                     raw = insight.get('chart_type', '')
                                     matched = "長條圖 (Bar)"
                                     for t in CHART_TYPES:
                                         if any(k.strip("()") in raw for k in t.split(' ') if len(k)>2):
                                             matched = t; break
                                     
+                                    # [CRITICAL FIX] 只更新 Index，不更新 Box Key，讓 Streamlit 自己處理同步
                                     st.session_state['chart_type_idx'] = CHART_TYPES.index(matched)
-                                    st.session_state['chart_type_box'] = matched
+                                    # st.session_state['chart_type_box'] = matched  <-- 移除這行導致崩潰的元兇
                                     
-                                    # 同步 Session State
                                     def sync(k, v, lst): 
                                         if v in lst: st.session_state[f"{k}_idx"], st.session_state[f"{k}_box"] = lst.index(v), v
                                         else: st.session_state[f"{k}_idx"] = 0
