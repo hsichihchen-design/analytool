@@ -51,13 +51,13 @@ def inject_custom_css(font_family):
         {google_font_import}
         html, body, [class*="css"] {{ font-family: {font_css_rule} !important; }}
         
-        /* [核心修改] 極限壓縮頂部留白，讓內容往上提 */
+        /* 核心修改：極限壓縮頂部留白 */
         .block-container {{
             padding-top: 1rem !important;
-            padding-bottom: 0rem !important;
+            padding-bottom: 2rem !important;
         }}
         
-        /* 隱藏預設的 Header 裝飾線，爭取更多空間 */
+        /* 隱藏 Header 裝飾線 */
         header {{ visibility: hidden; }}
         
         .stDownloadButton button {{ width: 100%; border-color: #4CAF50; color: #4CAF50; }}
@@ -112,35 +112,32 @@ def analyze_with_gemini(df, api_key):
         for col in df.columns:
             n_unique = df[col].nunique()
             dtype = str(df[col].dtype)
-            missing_rate = df[col].isnull().mean()
             col_profile = {
                 "dtype": dtype,
-                "unique_count": n_unique,
-                "missing_rate": f"{missing_rate:.1%}"
+                "n_unique": n_unique
             }
+            # 偵測數值
             if pd.api.types.is_numeric_dtype(df[col]) and n_unique > 0:
-                try:
-                    c_min = float(df[col].min())
-                    c_max = float(df[col].max())
-                    col_profile["min"] = c_min
-                    col_profile["max"] = c_max
-                    col_profile["median"] = float(df[col].median())
-                    is_yyyymm = (c_min > 190000 and c_max < 210012)
-                    is_yyyy = (c_min > 1900 and c_max < 2050 and n_unique < 50)
-                    if is_yyyymm or is_yyyy:
-                        col_profile["semantic_hint"] = "TIME_SERIES"
-                except: pass
+                col_profile["min"] = float(df[col].min())
+                col_max = float(df[col].max())
+                col_profile["max"] = col_max
+                
+                # 簡單偵測是否為時間序列 (YYYYMM)
+                if (col_max > 190000 and col_max < 210012):
+                    col_profile["semantic"] = "TIME_SERIES"
             
-            try: clean_samples = df[col].dropna().astype(str).sample(min(5, len(df))).tolist()
-            except: clean_samples = []
-            col_profile["samples"] = clean_samples
+            # 採樣
+            try: col_profile["samples"] = df[col].dropna().astype(str).sample(min(3, len(df))).tolist()
+            except: col_profile["samples"] = []
+            
             stats_info[col] = col_profile
 
         columns_summary = json.dumps(stats_info, ensure_ascii=False, indent=2)
         
+        # --- [Lyra Architect Prompt V80 - Enhanced] ---
         prompt = f"""
         <role>
-        你是一位數據視覺化架構師。請根據數據特性，分配不同的分析任務，挖掘多維度 Insight。
+        你是一位全能的數據視覺化專家。請分析以下數據結構，並產生涵蓋 **11 種不同圖表類型** 的分析建議。
         </role>
 
         <data_profile>
@@ -148,29 +145,38 @@ def analyze_with_gemini(df, api_key):
         </data_profile>
 
         <chart_catalog>
-        標準名稱 (請嚴格遵守):
-        1. [AGG] 聚合類: "長條圖 (Bar)", "折線圖 (Line)", "面積圖 (Area)", "圓餅圖 (Pie)", "樹狀圖 (TreeMap)", "雷達圖 (Radar)", "漏斗圖 (Funnel)"
-        2. [RAW] 原始分佈類: "直方圖 (Histogram)", "箱型圖 (Box Plot)", "散佈圖 (Scatter)"
-        3. [CPLX] 複雜類: "雙軸組合圖 (Combo)"
+        標準名稱 (嚴格遵守):
+        1. "長條圖 (Bar)": 用於比較分類數據。
+        2. "折線圖 (Line)": 用於時間趨勢 (TIME_SERIES)。
+        3. "面積圖 (Area)": 用於累積趨勢。
+        4. "圓餅圖 (Pie)": 用於佔比 (分類數 < 10)。
+        5. "雙軸組合圖 (Combo)": 必備！當有兩個數值欄位 (如: 銷售額 & 毛利率) 時使用。
+        6. "散佈圖 (Scatter)": 用於看兩個數值的相關性。
+        7. "箱型圖 (Box Plot)": 用於看分佈與離群值。
+        8. "直方圖 (Histogram)": 用於看單一數值頻率分佈。
+        9. "漏斗圖 (Funnel)": 當欄位包含 "階段"、"Stage" 或像漏斗的流程時使用。
+        10. "樹狀圖 (TreeMap)": 當有 "層級" 關係 (如: 地區->城市, 類別->子類別) 時使用。
+        11. "雷達圖 (Radar)": 當有多個評分指標 (如: 滿意度、效能、外觀) 時使用。
         </chart_catalog>
 
-        <mandatory_requirements>
-        請生成 **20 個** 建議，且必須滿足以下配額 (Diversity Quota)：
-        1. **至少 2 個 "箱型圖 (Box Plot)"**: 用於分析數值分佈與離群值。
-        2. **至少 2 個 "散佈圖 (Scatter)"**: 用於尋找變數關聯。
-        3. **時間序列必備**: 遇到 `TIME_SERIES`，必須出 "折線圖" 或 "面積圖"。
-        4. **高基數處理**: 若分類 > 50 種，建議 "長條圖 (Bar)" 並標註 (Top 10)。
-        </mandatory_requirements>
+        <requirements>
+        請生成 **22 個** 建議，並盡可能覆蓋上述所有圖表類型：
+        1. **必須包含** 至少 1 個 "漏斗圖" (若有階段欄位)。
+        2. **必須包含** 至少 1 個 "樹狀圖" (若有層級特徵)。
+        3. **必須包含** 至少 1 個 "雷達圖" (若有評分欄位)。
+        4. **必須包含** 至少 1 個 "雙軸組合圖"。
+        5. 時間欄位優先使用 "折線圖" 或 "面積圖"。
+        </requirements>
 
         <output_format>
-        回傳純 JSON Array:
+        回傳純 JSON Array (無 Markdown):
         [
           {{
-            "group": "群組名稱",
+            "group": "群組名稱 (例如: 趨勢分析, 結構分析, 漏斗分析)",
             "title": "標題 (Max 10字)",
-            "chart_type": "必須完全符合 chart_catalog 的中文名稱",
+            "chart_type": "Chart Catalog 中的標準名稱",
             "x_col": "欄位名",
-            "y_col": "欄位名",
+            "y_col": "欄位名 (數值)",
             "color_col": "欄位名 (可null)",
             "sort": "desc/asc/none"
           }}
@@ -191,27 +197,76 @@ def analyze_with_gemini(df, api_key):
         return None, f"AI 分析失敗: {str(e)}"
 
 # ==========================================
-# 3. 輔助與資料載入
+# 3. 輔助與資料載入 (超級測試資料版)
 # ==========================================
 
 @st.cache_data
 def generate_demo_excel():
-    rows = 600
+    # [超級測試資料產生器]
+    rows = 800
     start_date = datetime(2023, 1, 1)
-    dates = [start_date + timedelta(days=random.randint(0, 1000)) for _ in range(rows)]
+    
+    # 1. 基礎欄位
+    dates = [start_date + timedelta(days=random.randint(0, 365)) for _ in range(rows)]
+    ym_int = [int(d.strftime('%Y%m')) for d in dates]
+    
+    # 2. 層級資料 (For TreeMap)
+    regions = ['北區', '中區', '南區']
+    cities_map = {
+        '北區': ['台北市', '新北市', '基隆市'],
+        '中區': ['台中市', '新竹市', '苗栗縣'],
+        '南區': ['高雄市', '台南市', '嘉義市']
+    }
+    row_regions = []
+    row_cities = []
+    for _ in range(rows):
+        r = random.choice(regions)
+        c = random.choice(cities_map[r])
+        row_regions.append(r)
+        row_cities.append(c)
+
+    # 3. 漏斗資料 (For Funnel)
+    # 模擬隨機分佈，但保持數量級差異以形成漏斗狀
+    stages = ['1_瀏覽商品', '2_加入購物車', '3_結帳流程', '4_完成訂單']
+    weights = [0.4, 0.3, 0.2, 0.1]
+    row_stages = random.choices(stages, weights=weights, k=rows)
+
+    # 4. 雷達圖評分資料 (For Radar)
+    # 產品類別與對應的假想評分
+    products = ['旗艦機 Pro', '輕旗艦 Air', '入門機 SE', '電競機 GT']
+    row_products = [random.choice(products) for _ in range(rows)]
+    
+    # 5. 數值資料 (For Scatter, Box, Combo)
+    prices = np.random.randint(5000, 40000, rows)
+    units = np.random.randint(1, 10, rows)
+    sales = prices * units
+    margins = np.random.uniform(0.1, 0.4, rows) # 毛利率
+    profit = sales * margins
+    
+    # 產生 DataFrame
     df = pd.DataFrame({
-        '訂單編號': [f"ORD-{i}" for i in range(rows)],
-        '年月份': [int(d.strftime('%Y%m')) for d in dates],
-        '產品線': [random.choice(['旗艦機', '中階機', '入門機']) for _ in range(rows)],
-        '區域': [random.choice(['北區', '中區', '南區', '東區']) for _ in range(rows)],
-        '客戶滿意度': np.random.randint(1, 10, rows),
-        '產品評分': np.random.normal(7, 1.5, rows).clip(1, 10), 
-        '物流評分': np.random.normal(8, 1, rows).clip(1, 10),
-        '單價': np.random.randint(5000, 30000, rows),
-        '銷量': np.random.randint(1, 50, rows),
-        '折扣率': np.random.uniform(0.8, 1.0, rows)
+        '訂單日期': dates,
+        '年月份': ym_int,
+        '大區域': row_regions,   # For TreeMap
+        '城市': row_cities,       # For TreeMap
+        '產品型號': row_products,
+        '銷售階段': row_stages,   # For Funnel
+        '訂單金額': sales,        # For Bar, Line
+        '訂單利潤': profit,       # For Combo (Secondary Y)
+        '毛利率': margins,        # For Combo
+        '折扣率': np.random.choice([0, 0.05, 0.1, 0.2], rows), # For Histogram (Discrete)
+        '運送天數': np.random.randint(1, 7, rows),
+        # 以下為雷達圖專用指標 (平均後使用)
+        '效能評分': np.random.randint(6, 10, rows),
+        '外觀評分': np.random.randint(5, 10, rows),
+        'CP值評分': np.random.randint(4, 10, rows),
+        '售後評分': np.random.randint(6, 10, rows),
+        '續航評分': np.random.randint(5, 10, rows)
     })
-    df.loc[0:10, '單價'] = 80000 
+    
+    # 製造一些離群值 (For Box Plot)
+    df.loc[0:5, '訂單金額'] = df.loc[0:5, '訂單金額'] * 5 
+    
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
         df.to_excel(writer, index=False)
@@ -234,11 +289,9 @@ def load_data(file):
 # ==========================================
 # 4. 主介面
 # ==========================================
-# 移除 st.title 來節省空間，改用 Sidebar 顯示標題
-# st.title("✨ 作圖小工具 (Lyra V80)") 
 
 with st.sidebar:
-    st.markdown("### ✨ Lyra V80") # 標題移到這裡
+    st.markdown("### ✨ Lyra V80")
     st.header("1. 資料來源")
     st.session_state['gemini_api_key'] = st.text_input("🔑 Gemini API Key", value=st.session_state['gemini_api_key'], type="password")
     
@@ -251,9 +304,10 @@ with st.sidebar:
             except Exception as e: st.error(f"連線失敗: {e}")
 
     st.markdown("---")
-    with st.expander("📥 範例資料"):
+    with st.expander("📥 超級測試資料 (全圖表驗證)"):
+        st.caption("此資料包含：層級、漏斗階段、多維評分，可驗證所有 11 種圖表。")
         if st.button("🎲 生成測試資料"):
-            st.download_button("📊 下載 Excel", generate_demo_excel(), "Demo_Data.xlsx")
+            st.download_button("📊 下載 Excel", generate_demo_excel(), "Lyra_Full_Test_Data.xlsx")
 
     font_choice = st.selectbox("字體", ["Noto Sans TC (推薦)", "Microsoft JhengHei", "Arial"], index=0)
     inject_custom_css(font_choice)
@@ -418,12 +472,11 @@ if uploaded_files:
         # -------------------------------------------------------
         # [UI 優化] 顯示圖表 (Hero Section)
         # -------------------------------------------------------
-        # [空間魔術]：將圖表高度從 500 改為 450，保持視覺效果但省空間
         if current_chart_fig:
             current_chart_fig.update_layout(
                 template="plotly_white", 
-                height=450, # 調整後高度
-                margin=dict(t=30, b=10), # 縮減圖表自身的邊界
+                height=450, 
+                margin=dict(t=30, b=10),
                 font=dict(family=font_choice.split(',')[0].strip("'"), size=16), 
                 hovermode="x unified"
             )
@@ -437,7 +490,7 @@ if uploaded_files:
         
         if st.session_state['gemini_api_key']:
             if 'last_analyzed_file' not in st.session_state or st.session_state['last_analyzed_file'] != selected_file_name:
-                with st.spinner("🧠 正在構建分析矩陣..."):
+                with st.spinner("🧠 正在構建分析矩陣 (全面掃描 11 種圖表可能性)..."):
                     insights, error_msg = analyze_with_gemini(df, st.session_state['gemini_api_key'])
                     if not error_msg:
                         st.session_state['ai_insights'] = insights
@@ -447,9 +500,6 @@ if uploaded_files:
                 insights = st.session_state['ai_insights']
                 groups = sorted(list(set(ins['group'] for ins in insights)))
                 
-                # ★ [空間魔術]：將容器高度限制在 200px。
-                # 這裡會形成一個內部 Scrollbar，使用者可以在這個小區域內捲動找按鈕，
-                # 但整個瀏覽器視窗不會產生 Scrollbar。
                 st.markdown(f"**🤖 AI 深度分析建議** (共 {len(insights)} 項)")
                 with st.container(height=200, border=True):
                     
@@ -490,7 +540,9 @@ if uploaded_files:
                                     
                                     if matched_type == "樹狀圖 (TreeMap)" and insight.get('x_col'):
                                          st.session_state['treemap_path'] = [insight.get('x_col')]
+                                         # 自動補上第二層 (若有的話)
+                                         if '城市' in all_cols and insight.get('x_col') == '大區域':
+                                             st.session_state['treemap_path'] = ['大區域', '城市']
                                     
                                     st.session_state['menu_id'] += 1
-                                    
                                     st.rerun()
