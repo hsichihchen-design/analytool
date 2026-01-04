@@ -32,9 +32,9 @@ for key, value in default_states.items():
         st.session_state[key] = value
 
 # ==========================================
-# 1. 全域設定與 CSS (V110 穩定版)
+# 1. 全域設定與 CSS (V120 Fit Layout)
 # ==========================================
-st.set_page_config(page_title="作圖小工具 V110", layout="wide", page_icon="✨")
+st.set_page_config(page_title="作圖小工具 V120", layout="wide", page_icon="✨")
 
 def inject_custom_css(font_family):
     google_font_import = ""
@@ -50,30 +50,31 @@ def inject_custom_css(font_family):
         {google_font_import}
         html, body, [class*="css"] {{ font-family: {font_css_rule} !important; }}
         
-        /* 移除激進的頂部留白調整，避免標題被遮擋 */
-        /* 按鈕樣式優化 */
+        /* 讓容器更緊湊，避免出現雙重捲動軸 */
+        .block-container {{ padding-top: 1rem; padding-bottom: 0rem; }}
+        
         div.stButton > button {{
-            width: 100%; min-height: 50px; height: 100%; 
+            width: 100%; min-height: 45px; height: 100%; 
             white-space: normal; word-wrap: break-word;
-            padding: 8px 10px; line-height: 1.3; 
-            border-radius: 8px; border: 1px solid #e0e0e0;
+            padding: 6px 8px; line-height: 1.25; 
+            border-radius: 6px; border: 1px solid #e0e0e0;
             background-color: #ffffff; text-align: left; 
             display: flex; align-items: center;
-            font-size: 0.85rem; box-shadow: 0 2px 4px rgba(0,0,0,0.02);
+            font-size: 0.8rem; box-shadow: 0 1px 2px rgba(0,0,0,0.02);
             font-family: {font_css_rule} !important;
             transition: all 0.2s;
         }}
         div.stButton > button:hover {{
             border-color: #7c4dff; color: #7c4dff; 
             background-color: #f3f0ff;
-            transform: translateY(-2px); 
-            box-shadow: 0 4px 6px rgba(0,0,0,0.05);
+            transform: translateY(-1px); 
+            box-shadow: 0 2px 4px rgba(0,0,0,0.05);
             z-index: 1;
         }}
         
         .group-header {{
-            font-weight: 700; font-size: 0.95rem; color: #444;
-            margin-top: 10px; margin-bottom: 8px; padding-bottom: 4px;
+            font-weight: 700; font-size: 0.9rem; color: #555;
+            margin-top: 15px; margin-bottom: 5px; padding-bottom: 2px;
             border-bottom: 2px solid #f0f2f6;
             font-family: {font_css_rule} !important;
         }}
@@ -178,9 +179,9 @@ def load_data(file):
     except: return None
 
 # ==========================================
-# 4. 主介面 (V110 穩定版)
+# 4. 主介面 (V120 Fit Layout)
 # ==========================================
-st.title("✨ 作圖小工具 (Lyra V110)")
+st.title("✨ 作圖小工具 (Lyra V120)")
 
 # --- Sidebar ---
 with st.sidebar:
@@ -190,7 +191,7 @@ with st.sidebar:
         if st.session_state['gemini_api_key']: st.success("已連線")
     
     st.markdown("---")
-    if st.button("🎲 生成 V110 測試資料"):
+    if st.button("🎲 生成 V120 測試資料"):
         st.download_button("📊 下載 Excel", generate_demo_excel(), "Demo_Data.xlsx")
     
     font_choice = st.selectbox("字體", ["Noto Sans TC (推薦)", "Microsoft JhengHei", "Arial"], index=0)
@@ -236,10 +237,9 @@ if uploaded_files:
             agg_func = st.selectbox("計算", agg_funcs_list, index=st.session_state['agg_func_idx'], key='agg_func_box')
 
         # =========================================================
-        # 🚀 [Lyra V110] 穩定駕駛艙佈局：圖表區
+        # 🚀 [Lyra V120] 頂部圖表區 (固定 500px)
         # =========================================================
         
-        # 1. 計算數據 (Data Engine)
         if df is not None:
             try:
                 real_agg = {"總和 (Sum)": "sum", "平均 (Avg)": "mean", "最大值 (Max)": "max", "計數 (Count)": "count"}[agg_func]
@@ -253,11 +253,9 @@ if uploaded_files:
                     elif chart_type == "樹狀圖 (TreeMap)": df_agg = df.groupby(treemap_path, as_index=False)[y_col].agg(real_agg) if treemap_path else None
                     else: df_agg = df.groupby(cols, as_index=False)[y_col].agg(real_agg)
 
-                # 修正 X 軸 (年月轉字串)
                 if df_agg is not None and chart_type != "直方圖 (Histogram)" and x_col in df_agg.columns and pd.api.types.is_numeric_dtype(df_agg[x_col]):
                     if 190000 < df_agg[x_col].mean() < 210012: df_agg[x_col] = df_agg[x_col].astype(str)
 
-                # 時序鎖定 (折線圖不亂跑)
                 if chart_type in ["折線圖 (Line)", "面積圖 (Area)"] and df_agg is not None:
                     df_agg = df_agg.sort_values(by=x_col)
                 elif not use_raw and df_agg is not None and chart_type not in ["樹狀圖 (TreeMap)", "雷達圖 (Radar)"]:
@@ -265,7 +263,6 @@ if uploaded_files:
                      if idx == 1: df_agg = df_agg.sort_values(by=y_col, ascending=False)
                      elif idx == 2: df_agg = df_agg.sort_values(by=y_col, ascending=True)
 
-                # 2. 渲染圖表 (Rendering)
                 if df_agg is not None:
                     fig = None
                     p = {"data_frame": df_agg, "x": x_col if x_col in df_agg.columns else None, "title": f"{chart_type}"}
@@ -287,20 +284,19 @@ if uploaded_files:
                     elif chart_type == "散佈圖 (Scatter)": fig = px.scatter(df_agg, x=x_col, y=y_col, color=p.get("color"))
 
                     if fig:
-                        fig.update_layout(template="plotly_white", height=500, margin=dict(t=50, b=50, l=50, r=50), font=dict(family=font_choice.split(',')[0].strip("'"), size=16), hovermode="x unified")
-                        # 這裡放圖表，它是頁面最上方的元素
+                        fig.update_layout(template="plotly_white", height=500, margin=dict(t=30, b=50, l=50, r=50), font=dict(family=font_choice.split(',')[0].strip("'"), size=16), hovermode="x unified")
                         st.plotly_chart(fig, use_container_width=True)
             except Exception as e: st.error(f"繪圖錯誤: {e}")
 
         # =========================================================
-        # 🚀 [Lyra V110] 獨立捲動控制台 (Stable)
+        # 🚀 [Lyra V120] 下方按鈕區 (高度縮減為 300px)
         # =========================================================
         st.markdown("---")
         st.subheader("🤖 AI 戰略分析面板")
-        st.caption("👇 在此處捲動挑選，上方圖表不會跑掉")
+        st.caption("👇 捲動挑選")
 
-        # 使用固定高度容器，這就是「不需要捲動網頁」的關鍵
-        with st.container(height=450):
+        # [CRITICAL] 縮小容器高度，避免雙重捲動軸
+        with st.container(height=300):
             if st.session_state['gemini_api_key']:
                 if 'last_analyzed_file' not in st.session_state or st.session_state['last_analyzed_file'] != selected_file_name:
                     with st.spinner("🧠 正在掃描全域數據特徵..."):
@@ -326,12 +322,12 @@ if uploaded_files:
                                         if any(k.strip("()") in raw for k in t.split(' ') if len(k)>2):
                                             matched = t; break
                                     
-                                    # [CRITICAL FIX] 只更新 Index，不更新 Box Key，讓 Streamlit 自己處理同步
+                                    # [Lyra V120 Fix] 只更新 Index，讓 Streamlit 自己同步，避免崩潰
                                     st.session_state['chart_type_idx'] = CHART_TYPES.index(matched)
-                                    # st.session_state['chart_type_box'] = matched  <-- 移除這行導致崩潰的元兇
                                     
                                     def sync(k, v, lst): 
-                                        if v in lst: st.session_state[f"{k}_idx"], st.session_state[f"{k}_box"] = lst.index(v), v
+                                        # [Lyra V120 Fix] 只更新 Index，不碰 _box
+                                        if v in lst: st.session_state[f"{k}_idx"] = lst.index(v)
                                         else: st.session_state[f"{k}_idx"] = 0
                                     
                                     sync('x_col', insight.get('x_col'), all_cols)
