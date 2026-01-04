@@ -11,35 +11,33 @@ import google.generativeai as genai
 import json
 
 # ==========================================
-# 0. 全域設定與 Helper Functions
+# 0. 初始化 Session State
 # ==========================================
-st.set_page_config(page_title="作圖小工具 V140", layout="wide", page_icon="✨")
+default_states = {
+    'chart_type_idx': 0, 
+    'x_col_idx': 0,
+    'y_col_idx': 0,
+    'y_col_2_idx': 0,
+    'color_col_idx': 0,
+    'facet_col_idx': 0,
+    'agg_func_idx': 0,
+    'sort_order_idx': 0,
+    'ref_line_val': 0.0,
+    'treemap_path': [],
+    'gemini_api_key': ''
+}
 
-# 安全獲取 Index 的小工具
-def safe_index(val, options):
-    try: return options.index(val)
-    except: return 0
-
-# ==========================================
-# 1. 初始化 Session State (索引驅動核心)
-# ==========================================
-# 我們只追蹤 IDX (整數索引)，這是最穩定的方式
-state_keys = [
-    'chart_type_idx', 'x_col_idx', 'y_col_idx', 'y_col_2_idx', 
-    'color_col_idx', 'agg_func_idx', 'sort_order_idx',
-    'treemap_path', 'gemini_api_key', 'ai_insights', 'last_analyzed_file'
-]
-
-for key in state_keys:
+for key, value in default_states.items():
     if key not in st.session_state:
-        if 'idx' in key: st.session_state[key] = 0
-        elif 'path' in key: st.session_state[key] = []
-        else: st.session_state[key] = None
+        st.session_state[key] = value
 
 # ==========================================
-# 2. CSS 樣式 (V140 Layout)
+# 1. 全域設定與 CSS (V40 修正版)
 # ==========================================
+st.set_page_config(page_title="作圖小工具 V40", layout="wide", page_icon="✨")
+
 def inject_custom_css(font_family):
+    # 字體設定
     google_font_import = ""
     font_css_rule = font_family
     if font_family == "Noto Sans TC (推薦)":
@@ -51,42 +49,43 @@ def inject_custom_css(font_family):
     st.markdown(f"""
     <style>
         {google_font_import}
-        html, body, [class*="css"] {{ font-family: {font_css_rule} !important; }}
         
-        /* 確保頂部留白足夠，標題不被遮擋 */
-        .block-container {{ padding-top: 3rem; padding-bottom: 2rem; }}
-        
-        div.stButton > button {{
-            width: 100%; min-height: 45px; height: 100%; 
-            white-space: normal; word-wrap: break-word;
-            padding: 6px 8px; line-height: 1.25; 
-            border-radius: 6px; border: 1px solid #e0e0e0;
-            background-color: #ffffff; text-align: left; 
-            display: flex; align-items: center;
-            font-size: 0.8rem; box-shadow: 0 1px 2px rgba(0,0,0,0.02);
+        html, body, [class*="css"] {{
             font-family: {font_css_rule} !important;
-            transition: all 0.2s;
+        }}
+        .stDownloadButton button {{ width: 100%; border-color: #4CAF50; color: #4CAF50; }}
+        
+        /* 7欄按鈕樣式 */
+        div.stButton > button {{
+            width: 100%; min-height: 45px; height: 100%; white-space: normal; word-wrap: break-word;
+            padding: 4px 6px; line-height: 1.2; border-radius: 4px; border: 1px solid #ddd;
+            background-color: #ffffff; text-align: left; display: flex; align-items: center;
+            font-size: 0.8rem; box-shadow: 0 1px 1px rgba(0,0,0,0.05);
+            font-family: {font_css_rule} !important;
         }}
         div.stButton > button:hover {{
-            border-color: #7c4dff; color: #7c4dff; 
-            background-color: #f3f0ff;
-            transform: translateY(-1px); 
-            box-shadow: 0 2px 4px rgba(0,0,0,0.05);
-            z-index: 1;
+            border-color: #7c4dff; color: #7c4dff; background-color: #f8f5ff;
+            transform: translateY(-1px); z-index: 1;
         }}
         
         .group-header {{
-            font-weight: 700; font-size: 0.9rem; color: #555;
+            font-weight: 700; font-size: 0.9rem; color: #666;
             margin-top: 15px; margin-bottom: 5px; padding-bottom: 2px;
-            border-bottom: 2px solid #f0f2f6;
+            border-bottom: 1px solid #eee;
             font-family: {font_css_rule} !important;
         }}
+        
+        /* [修正點 1] 增加上方留白，避免標題被切掉 */
+        .block-container {{ padding-top: 3.5rem; }}
+        
+        [data-testid="stSidebar"] [data-testid="stTextInput"] input {{ border-color: #7c4dff; }}
     </style>
     """, unsafe_allow_html=True)
 
 # ==========================================
-# 3. Gemini AI 引擎
+# 2. 核心功能：Gemini AI 分析引擎
 # ==========================================
+
 def get_valid_model():
     try:
         models = [m for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
@@ -95,283 +94,525 @@ def get_valid_model():
         for m in models:
             if 'pro' in m.name: return m.name
         return 'gemini-pro'
-    except: return 'gemini-pro'
+    except:
+        return 'gemini-pro'
 
 def analyze_with_gemini(df, api_key):
-    if not api_key: return None, "請先輸入 API Key。"
+    if not api_key:
+        return None, "請先輸入 API Key。"
+
     try:
         genai.configure(api_key=api_key)
-        model = genai.GenerativeModel(get_valid_model())
+        model_name = get_valid_model()
+        model = genai.GenerativeModel(model_name)
 
         stats_info = {}
         for col in df.columns:
             n_unique = df[col].nunique()
             dtype = str(df[col].dtype)
-            missing_rate = df[col].isnull().mean()
-            col_profile = {"dtype": dtype, "unique": n_unique, "missing": f"{missing_rate:.1%}"}
-            if pd.api.types.is_numeric_dtype(df[col]) and n_unique > 0:
-                try:
-                    c_min, c_max = float(df[col].min()), float(df[col].max())
-                    col_profile.update({"min": c_min, "max": c_max, "median": float(df[col].median())})
-                    if (c_min > 190000 and c_max < 210012) or (c_min > 1900 and c_max < 2050 and n_unique < 50):
-                        col_profile["hint"] = "TIME"
-                except: pass
-            try: col_profile["samples"] = df[col].dropna().astype(str).sample(min(5, len(df))).tolist()
-            except: col_profile["samples"] = []
-            stats_info[col] = col_profile
+            stats_info[col] = f"Type: {dtype}, Unique: {n_unique}"
+            if n_unique < 10:
+                stats_info[col] += f", Examples: {list(df[col].unique())}"
 
-        summary = json.dumps(stats_info, ensure_ascii=False, indent=2)
-        
+        columns_summary = json.dumps(stats_info, ensure_ascii=False, indent=2)
+        data_preview = df.head(3).to_markdown(index=False)
+
+        # [修正點 2] Prompt 新增「義大利麵條圖 (Spaghetti Chart)」禁令
         prompt = f"""
-        <role>全方位數據視覺化架構師</role>
-        <data>{summary}</data>
-        <catalog>
-        1. [AGG] 聚合類: "長條圖 (Bar)", "折線圖 (Line)", "面積圖 (Area)", "圓餅圖 (Pie)", "樹狀圖 (TreeMap)", "雷達圖 (Radar)", "漏斗圖 (Funnel)"
-        2. [RAW] 原始分佈類: "直方圖 (Histogram)", "箱型圖 (Box Plot)", "散佈圖 (Scatter)"
-        3. [CPLX] 複雜類: "雙軸組合圖 (Combo)"
-        </catalog>
-        <rules>
-        生成 **20 個** 建議。
-        1. **箱型圖 (Box Plot)** x2: 分析分佈與離群值。
-        2. **散佈圖 (Scatter)** x2: 尋找關聯。
-        3. **時間必備**: 遇到 `TIME` 必出 "折線圖" 或 "面積圖"。
-        4. **高基數**: 分類>50 用 "長條圖 (Bar)" (Top 10)。
-        </rules>
-        <output>
-        JSON Array: [{{ "group": "群組", "title": "標題", "chart_type": "類型", "x_col": "X", "y_col": "Y", "color_col": "Color", "sort": "desc/asc/none" }}]
-        </output>
+        你是一位精通資料視覺化的分析師。請分析資料，提供 20 個分析圖表建議。
+        
+        【欄位統計】：
+        {columns_summary}
+        
+        【數據預覽】：
+        {data_preview}
+        
+        【嚴格規則】：
+        1. **標題限制**：嚴格控制在 **10 個中文字以內**。
+        2. **去除贅詞**：不要包含「分析」、「統計」、「圖表」等字。
+        3. **視覺防呆 (Spaghetti Chart Prevention)**：
+           - **折線圖 (Line)**：如果某個欄位的 Unique Values > 10，**絕對禁止**用該欄位做顏色分組 (`color_col`)，因為線條會太多太亂。改用 `color_col: null` 畫總體趨勢即可。
+           - **圓餅圖 (Pie)**：Unique > 15 禁止。
+           - **長條圖 (Bar)**：Unique > 50 禁止 (除非 Top N)。
+        4. **雙軸防呆**：左右軸必須是不同欄位。
+        
+        請回傳 **純 JSON 格式**：
+        [
+            {{
+                "group": "群組 (例如: 趨勢/排行/佔比/交叉)",
+                "title": "極短標題 (Max 10字)",
+                "chart_type": "圖表類型", 
+                "x_col": "X軸欄位",
+                "y_col": "Y軸欄位",
+                "color_col": "顏色欄位(可null)",
+                "sort": "desc/asc/none"
+            }}
+        ]
+        
+        【可用圖表類型】:
+        "長條圖 (Bar)", "折線圖 (Line)", "雙軸組合圖 (Combo)", "圓餅圖 (Pie)", "樹狀圖 (TreeMap)", 
+        "散佈圖 (Scatter)", "箱型圖 (Box Plot)", "面積圖 (Area)", "直方圖 (Histogram)", "雷達圖 (Radar)"
         """
+
         response = model.generate_content(prompt)
-        json_str = response.text.strip().replace("```json", "").replace("```", "")
-        return json.loads(json_str), None
-    except Exception as e: return None, f"AI 分析失敗: {str(e)}"
+        
+        json_str = response.text.strip()
+        if json_str.startswith("```json"): json_str = json_str[7:]
+        if json_str.startswith("```"): json_str = json_str[3:]
+        if json_str.endswith("```"): json_str = json_str[:-3]
+            
+        insights = json.loads(json_str)
+        return insights, None
+
+    except Exception as e:
+        return None, f"AI 分析失敗: {str(e)}"
 
 # ==========================================
-# 4. 資料載入
+# 3. 使用說明書
 # ==========================================
+def get_manual_content():
+    return """
+# 📊 作圖小工具 (V40 完美防呆版) 使用手冊
+
+## 1. 🔑 啟動 AI
+1. 前往 Google AI Studio 申請免費 Key。
+2. 貼入左側「🔑 Gemini API Key」欄位並點擊驗證。
+
+## 2. 🤖 智慧分析
+上傳檔案後，AI 會自動生成 20 個精簡標題建議。
+**新功能**：系統會自動過濾掉「太醜」的圖表 (例如線條太多的折線圖)，強制只顯示前 10 名，確保畫面清爽。
+
+## 3. 🛠️ 疑難排解
+* **標題顯示**：已修復標題被切掉的問題。
+* **字體**：建議選擇 "Noto Sans TC" 獲得最佳體驗。
+
+祝您分析愉快！
+    """
+
 @st.cache_data
 def generate_demo_excel():
-    rows = 600
-    start = datetime(2023, 1, 1)
-    dates = [start + timedelta(days=random.randint(0, 1000)) for _ in range(rows)]
+    rows = 2000
+    start_date = datetime(2023, 1, 1)
+    dates = [start_date + timedelta(days=random.randint(0, 365)) for _ in range(rows)]
+    locations = {'北區': ['台北', '新北'], '中區': ['台中', '新竹'], '南區': ['高雄', '台南']}
+    regions, cities = [], []
+    for _ in range(rows):
+        r = random.choice(list(locations.keys()))
+        regions.append(r)
+        cities.append(random.choice(locations[r]))
+    cats = ['電子', '家具', '家電']
+    c_list = [random.choice(cats) for _ in range(rows)]
     df = pd.DataFrame({
-        '訂單': [f"ORD-{i}" for i in range(rows)],
-        '年月份': [int(d.strftime('%Y%m')) for d in dates],
-        '產品線': [random.choice(['旗艦機', '中階機', '入門機']) for _ in range(rows)],
-        '區域': [random.choice(['北區', '中區', '南區', '東區']) for _ in range(rows)],
-        '滿意度': np.random.randint(1, 10, rows),
-        '產品評分': np.random.normal(7, 1.5, rows).clip(1, 10), 
-        '單價': np.random.randint(5000, 30000, rows),
-        '銷量': np.random.randint(1, 50, rows)
+        '訂單日期': dates, '地區': regions, '門市': cities, '產品類別': c_list,
+        '銷售金額': np.random.randint(1000, 50000, rows),
+        '利潤': np.random.randint(100, 5000, rows),
+        '運送天數': np.random.poisson(3, rows),
+        '滿意度': np.random.randint(1, 6, rows)
     })
-    df.loc[0:10, '單價'] = 80000 
     output = io.BytesIO()
-    with pd.ExcelWriter(output, engine='xlsxwriter') as writer: df.to_excel(writer, index=False)
+    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+        df.to_excel(writer, index=False, sheet_name='DemoData')
     return output.getvalue()
 
 @st.cache_data
 def load_data(file):
     try:
-        df = pd.read_csv(file) if file.name.endswith('.csv') else pd.read_excel(file)
+        if file.name.endswith('.csv'): df = pd.read_csv(file)
+        else: df = pd.read_excel(file)
         for col in df.columns:
             if pd.api.types.is_datetime64_any_dtype(df[col]) or '日期' in col or 'Date' in col:
                 try: df[col] = pd.to_datetime(df[col])
                 except: pass
         return df
-    except: return None
+    except Exception as e:
+        st.error(f"檔案讀取失敗: {e}")
+        return None
 
 # ==========================================
-# 5. 主介面 (V140 Two-Way Binding Architecture)
+# 4. 主介面開始
 # ==========================================
-st.title("✨ 作圖小工具 (Lyra V140)")
+st.title("✨ 作圖小工具 (Gemini AI版)")
 
-# --- Sidebar ---
 with st.sidebar:
     st.header("1. 資料來源")
-    st.session_state['gemini_api_key'] = st.text_input("🔑 Gemini Key", value=st.session_state.get('gemini_api_key',''), type="password")
-    if st.button("✅ 連線"): 
-        if st.session_state['gemini_api_key']: st.success("已連線")
     
+    st.session_state['gemini_api_key'] = st.text_input("🔑 Gemini API Key", value=st.session_state['gemini_api_key'], type="password")
+    
+    if st.button("✅ 驗證 API Key", use_container_width=True):
+        if not st.session_state['gemini_api_key']:
+            st.error("請先輸入 Key")
+        else:
+            try:
+                genai.configure(api_key=st.session_state['gemini_api_key'])
+                models = list(genai.list_models())
+                st.success(f"連線成功！")
+            except Exception as e:
+                st.error(f"連線失敗: {e}")
+
     st.markdown("---")
-    if st.button("🎲 生成測試資料"):
-        st.download_button("📊 下載 Excel", generate_demo_excel(), "Demo_Data.xlsx")
     
-    font_choice = st.selectbox("字體", ["Noto Sans TC (推薦)", "Microsoft JhengHei", "Arial"], index=0)
+    with st.expander("📥 下載範例與說明書", expanded=False):
+        st.download_button("📄 下載說明書", get_manual_content(), "User_Manual.txt")
+        if st.button("🎲 生成範例資料"):
+            excel_data = generate_demo_excel()
+            st.download_button("📊 下載 Excel", excel_data, "Demo_Data.xlsx")
+    
+    font_options = ["Noto Sans TC (推薦)", "Microsoft JhengHei", "華康粗圓體", "華康儷中黑", "Arial"]
+    font_choice = st.selectbox("字體", font_options, index=0)
     inject_custom_css(font_choice)
-    uploaded_files = st.file_uploader("上傳檔案", type=["xlsx", "csv"], accept_multiple_files=True)
+    
+    uploaded_files = st.file_uploader("上傳 Excel/CSV", type=["xlsx", "csv"], accept_multiple_files=True)
 
 df = None
-CHART_TYPES = ["長條圖 (Bar)", "折線圖 (Line)", "雙軸組合圖 (Combo)", "圓餅圖 (Pie)", "樹狀圖 (TreeMap)", "散佈圖 (Scatter)", "箱型圖 (Box Plot)", "直方圖 (Histogram)", "雷達圖 (Radar)", "面積圖 (Area)", "漏斗圖 (Funnel)"]
-RAW_DATA_CHARTS = ["箱型圖 (Box Plot)", "直方圖 (Histogram)", "散佈圖 (Scatter)"]
-agg_funcs_list = ["總和 (Sum)", "平均 (Avg)", "最大值 (Max)", "計數 (Count)"]
+all_cols, num_cols, cat_cols = [], [], []
 
 if uploaded_files:
     file_map = {f.name: f for f in uploaded_files}
     with st.sidebar: selected_file_name = st.selectbox("選擇檔案", list(file_map.keys()))
-    df = load_data(file_map[selected_file_name])
+    current_file = file_map[selected_file_name]
+    df = load_data(current_file)
     
     if df is not None:
-        # 重置索引：如果換了檔案，為了安全起見，重置某些索引
-        if st.session_state.get('last_analyzed_file') != selected_file_name:
-             # 不強制重置所有，但更新檔案標記
-             pass 
+        date_cols = [c for c in df.columns if pd.api.types.is_datetime64_any_dtype(df[c])]
+        if date_cols:
+            with st.sidebar:
+                st.markdown("---")
+                time_granularity = st.selectbox("⏳ 時間粒度", ["年-月 (Default)", "年", "季", "週", "日"])
+            for col in date_cols:
+                time_col_name = f"{col}(時間)"
+                if time_granularity == "年": df[time_col_name] = df[col].dt.strftime('%Y')
+                elif time_granularity == "季": df[time_col_name] = df[col].dt.to_period('Q').astype(str)
+                elif time_granularity == "週": df[time_col_name] = df[col].dt.strftime('%Y-W%U')
+                elif time_granularity == "日": df[time_col_name] = df[col].dt.strftime('%Y-%m-%d')
+                else: df[time_col_name] = df[col].dt.strftime('%Y-%m')
 
         num_cols = df.select_dtypes(include=['number']).columns.tolist()
         cat_cols = df.select_dtypes(exclude=['number', 'datetime']).columns.tolist()
         all_cols = df.columns.tolist()
+        
+        chart_types_list = ["長條圖 (Bar)", "折線圖 (Line)", "雙軸組合圖 (Combo)", "圓餅圖 (Pie)", "樹狀圖 (TreeMap)", "散佈圖 (Scatter)", "箱型圖 (Box Plot)", "面積圖 (Area)", "直方圖 (Histogram)", "雷達圖 (Radar)", "漏斗圖 (Funnel)"]
+        agg_funcs_list = ["總和 (Sum)", "平均 (Avg)", "最大值 (Max)", "最小值 (Min)", "計數 (Count)"]
+        sort_orders_list = ["預設 (依 X 軸)", "數值由大到小 (Desc)", "數值由小到大 (Asc)"]
 
-        # --- Sidebar 設定區 (Callbacks) ---
-        # 這些 callback 確保當使用者手動選的時候，idx 會更新
-        def update_chart_idx(): st.session_state.chart_type_idx = safe_index(st.session_state.w_chart_type, CHART_TYPES)
-        def update_x_idx(): st.session_state.x_col_idx = safe_index(st.session_state.w_x_col, all_cols)
-        def update_y_idx(): st.session_state.y_col_idx = safe_index(st.session_state.w_y_col, num_cols)
-        def update_y2_idx(): st.session_state.y_col_2_idx = safe_index(st.session_state.w_y2_col, num_cols)
-        def update_color_idx(): st.session_state.color_col_idx = safe_index(st.session_state.w_color_col, ["(無)"]+all_cols)
-        def update_agg_idx(): st.session_state.agg_func_idx = safe_index(st.session_state.w_agg, agg_funcs_list)
+        st.markdown("---")
+        st.subheader("🤖 Gemini 智慧分析建議 (20+ Insights)")
+        
+        if st.session_state['gemini_api_key']:
+            if 'last_analyzed_file' not in st.session_state or st.session_state['last_analyzed_file'] != selected_file_name:
+                with st.spinner("🤖 AI 正在生成精簡分析建議..."):
+                    insights, error_msg = analyze_with_gemini(df, st.session_state['gemini_api_key'])
+                    if error_msg:
+                        st.error(error_msg)
+                    else:
+                        st.session_state['ai_insights'] = insights
+                        st.session_state['last_analyzed_file'] = selected_file_name
+            
+            if st.session_state.get('ai_insights'):
+                insights = st.session_state['ai_insights']
+                groups = sorted(list(set(ins['group'] for ins in insights)))
+                
+                for group_name in groups:
+                    st.markdown(f"<div class='group-header'>{group_name}</div>", unsafe_allow_html=True)
+                    cols = st.columns(7) 
+                    group_insights = [ins for ins in insights if ins['group'] == group_name]
+                    for i, insight in enumerate(group_insights):
+                        with cols[i % 7]:
+                            if st.button(insight['title'], key=f"btn_{group_name}_{i}"):
+                                c_type = insight.get('chart_type', '長條圖 (Bar)')
+                                if c_type not in chart_types_list: c_type = '長條圖 (Bar)'
+                                
+                                st.session_state['chart_type_idx'] = chart_types_list.index(c_type)
+                                st.session_state['chart_type_box'] = c_type
+                                
+                                sort_str = insight.get('sort', 'none')
+                                s_idx = 0
+                                if sort_str == 'desc': s_idx = 1
+                                elif sort_str == 'asc': s_idx = 2
+                                st.session_state['sort_order_idx'] = s_idx
+                                st.session_state['sort_order_box'] = sort_orders_list[s_idx]
 
+                                def sync_box(key_idx, key_box, col_list, target_val):
+                                    if target_val and target_val in col_list:
+                                        st.session_state[key_idx] = col_list.index(target_val)
+                                        st.session_state[key_box] = target_val
+                                    else:
+                                        st.session_state[key_idx] = 0
+                                        st.session_state[key_box] = col_list[0] if col_list else None
+
+                                sync_box('x_col_idx', 'x_col_box', all_cols, insight.get('x_col'))
+                                sync_box('y_col_idx', 'y_col_box', num_cols, insight.get('y_col'))
+                                sync_box('y_col_2_idx', 'y_col_2_box', num_cols, insight.get('y_col')) 
+                                
+                                # [修正點 3] 顏色分組防呆機制
+                                target_color = insight.get('color_col')
+                                # 如果 AI 建議了顏色，但該欄位 Unique > 10，強制設為 無
+                                if target_color and target_color in df.columns:
+                                    if df[target_color].nunique() > 10 and "折線圖" in c_type:
+                                        target_color = None
+                                        st.toast(f"⚠️ 為了圖表可讀性，已自動隱藏 '{insight.get('color_col')}' 的顏色分組 (太多類別)", icon="🛡️")
+                                
+                                sync_box('color_col_idx', 'color_col_box', ["(無)"]+all_cols, target_color)
+                                
+                                if c_type == "樹狀圖 (TreeMap)" and insight.get('x_col'):
+                                    st.session_state['treemap_path'] = [insight.get('x_col')]
+                                    st.session_state['treemap_box'] = [insight.get('x_col')]
+
+                                st.rerun()
+        else:
+            st.warning("請輸入 API Key 以啟用智慧分析。")
+
+        # === 側邊欄與繪圖設定 (維持 V35.1 修復版) ===
         with st.sidebar:
             st.markdown("---")
             st.header("2. 繪圖設定")
             
-            # 1. Chart Type (Widget Key 加上 w_ 前綴，避免衝突)
-            chart_type = st.selectbox(
-                "圖表類型", CHART_TYPES, 
-                index=st.session_state.chart_type_idx, 
-                key='w_chart_type', on_change=update_chart_idx
-            )
+            chart_type = st.selectbox("圖表類型", chart_types_list, index=st.session_state['chart_type_idx'], key='chart_type_box')
             
-            # 2. X / Y Selection
+            x_col, y_col, y_col_2, color_col, facet_col = None, None, None, None, None
+            agg_func = "sum"
+            marker_symbol = "circle"
+            agg_map = {"總和 (Sum)": "sum", "平均 (Avg)": "mean", "最大值 (Max)": "max", "最小值 (Min)": "min", "計數 (Count)": "count"}
+            symbol_map_zh = {"圓形 (Circle)": "circle", "正方形 (Square)": "square", "菱形 (Diamond)": "diamond", "十字 (Cross)": "cross", "叉叉 (X)": "x", "三角形 (Triangle)": "triangle-up"}
+            combo_types = ["長條圖 (Bar)", "折線圖 (Line)", "面積圖 (Area)", "散佈圖 (Scatter)"]
+
             if chart_type == "雙軸組合圖 (Combo)":
-                x_col = st.selectbox("X 軸", all_cols, index=st.session_state.x_col_idx, key='w_x_col', on_change=update_x_idx)
-                y_col = st.selectbox("左軸", num_cols, index=st.session_state.y_col_idx, key='w_y_col', on_change=update_y_idx)
-                y_col_2 = st.selectbox("右軸", num_cols, index=st.session_state.y_col_2_idx, key='w_y2_col', on_change=update_y2_idx)
+                st.info("💡 自由配：請分別設定左右軸")
+                x_col = st.selectbox("X 軸 (共用)", all_cols, index=st.session_state['x_col_idx'], key='x_col_box')
+                agg_label = st.selectbox("計算方式", agg_funcs_list, index=st.session_state['agg_func_idx'], key='agg_func_box')
+                agg_func = agg_map[agg_label]
+                st.markdown("---")
+                col_L1, col_L2 = st.columns(2)
+                with col_L1: type_L = st.selectbox("左軸類型", combo_types, index=0)
+                with col_L2: y_col = st.selectbox("左軸數值", num_cols, index=st.session_state['y_col_idx'], key='y_col_box')
+                col_R1, col_R2 = st.columns(2)
+                with col_R1: type_R = st.selectbox("右軸類型", combo_types, index=1)
+                with col_R2: y_col_2 = st.selectbox("右軸數值", num_cols, index=st.session_state['y_col_2_idx'], key='y_col_2_box')
+                color_col = st.selectbox("顏色分組", ["(無)"] + all_cols, index=st.session_state['color_col_idx'], key='color_col_box')
+            elif chart_type in ["長條圖 (Bar)", "折線圖 (Line)", "面積圖 (Area)", "漏斗圖 (Funnel)", "雷達圖 (Radar)"]:
+                x_col = st.selectbox("X 軸", all_cols, index=st.session_state['x_col_idx'], key='x_col_box')
+                y_col = st.selectbox("Y 軸", num_cols, index=st.session_state['y_col_idx'], key='y_col_box')
+                agg_label = st.selectbox("計算方式", agg_funcs_list, index=st.session_state['agg_func_idx'], key='agg_func_box')
+                agg_func = agg_map[agg_label]
+                color_col = st.selectbox("顏色分組", ["(無)"] + all_cols, index=st.session_state['color_col_idx'], key='color_col_box')
+                if chart_type not in ["雷達圖 (Radar)"]: facet_col = st.selectbox("拆分圖表 (Facet)", ["(無)"] + cat_cols, index=st.session_state['facet_col_idx'], key='facet_col_box')
+                if chart_type == "折線圖 (Line)":
+                    symbol_label = st.selectbox("點的形狀", list(symbol_map_zh.keys()))
+                    marker_symbol = symbol_map_zh[symbol_label]
             elif chart_type == "樹狀圖 (TreeMap)":
-                treemap_path = st.multiselect("層級", cat_cols, default=st.session_state.treemap_path or cat_cols[:1], key='w_tree')
-                st.session_state.treemap_path = treemap_path # 直接同步
-                y_col = st.selectbox("數值", num_cols, index=st.session_state.y_col_idx, key='w_y_col', on_change=update_y_idx)
-                x_col = all_cols[0] if all_cols else None # Dummy
-            else:
-                x_col = st.selectbox("X 軸", all_cols, index=st.session_state.x_col_idx, key='w_x_col', on_change=update_x_idx)
-                y_col = st.selectbox("Y 軸", num_cols, index=st.session_state.y_col_idx, key='w_y_col', on_change=update_y_idx)
-            
-            # 3. Color & Agg
-            if chart_type not in ["樹狀圖 (TreeMap)"]:
-                color_col = st.selectbox("分組", ["(無)"] + all_cols, index=st.session_state.color_col_idx, key='w_color_col', on_change=update_color_idx)
-            else: color_col = "(無)"
-            
-            agg_func = st.selectbox("計算", agg_funcs_list, index=st.session_state.agg_func_idx, key='w_agg', on_change=update_agg_idx)
+                default_tree_path = st.session_state['treemap_path'] if st.session_state['treemap_path'] else (cat_cols[:2] if len(cat_cols)>=2 else cat_cols[:1])
+                treemap_path = st.multiselect("層級結構", cat_cols, default=default_tree_path, key='treemap_box')
+                y_col = st.selectbox("數值大小", num_cols, index=st.session_state['y_col_idx'], key='y_col_box')
+                color_col = st.selectbox("顏色依據", ["(無)"] + num_cols + cat_cols, index=st.session_state['color_col_idx'], key='color_col_box')
+                agg_label = st.selectbox("計算方式", agg_funcs_list, index=st.session_state['agg_func_idx'], key='agg_func_box')
+                agg_func = agg_map[agg_label]
+            elif chart_type == "圓餅圖 (Pie)":
+                x_col = st.selectbox("分類 (Label)", cat_cols, index=st.session_state.get('x_col_idx_pie', 0), key='x_col_box_pie')
+                y_col = st.selectbox("數值 (Value)", num_cols, index=st.session_state['y_col_idx'], key='y_col_box')
+                agg_label = st.selectbox("計算方式", agg_funcs_list, index=st.session_state['agg_func_idx'], key='agg_func_box')
+                agg_func = agg_map[agg_label]
+            elif chart_type == "散佈圖 (Scatter)":
+                x_col = st.selectbox("X 軸", all_cols, index=st.session_state['x_col_idx'], key='x_col_box')
+                y_col = st.selectbox("Y 軸", num_cols, index=st.session_state['y_col_idx'], key='y_col_box')
+                color_col = st.selectbox("顏色分組", ["(無)"] + all_cols, index=st.session_state['color_col_idx'], key='color_col_box')
+                symbol_label = st.selectbox("點的形狀", list(symbol_map_zh.keys()))
+                marker_symbol = symbol_map_zh[symbol_label]
+            elif chart_type == "箱型圖 (Box Plot)":
+                x_col = st.selectbox("X 軸 (分組)", cat_cols, index=st.session_state.get('x_col_idx_box', 0), key='x_col_box_box')
+                y_col = st.selectbox("Y 軸 (數值)", num_cols, index=st.session_state['y_col_idx'], key='y_col_box')
+                color_col = st.selectbox("顏色分組", ["(無)"] + all_cols, index=st.session_state['color_col_idx'], key='color_col_box')
+            elif chart_type == "直方圖 (Histogram)":
+                x_col = st.selectbox("X 軸 (數值分佈)", num_cols, index=st.session_state.get('x_col_idx_hist', 0), key='x_col_box_hist')
+                color_col = st.selectbox("顏色分組", ["(無)"] + cat_cols, index=st.session_state['color_col_idx'], key='color_col_box')
 
-        # =========================================================
-        # 🚀 [Lyra V140] 圖表渲染引擎 (Protected)
-        # =========================================================
-        
+            st.markdown("---")
+            st.header("3. 外觀與細節")
+            user_x_min, user_x_max = None, None
+            if x_col and x_col in df.columns:
+                with st.expander("🔎 縮放 X 軸範圍 (X-Axis Range)", expanded=False):
+                    if pd.api.types.is_datetime64_any_dtype(df[x_col]) or "訂單日期" in x_col or "date" in x_col.lower():
+                        try:
+                            min_date = df[x_col].min().date() if hasattr(df[x_col].min(), 'date') else df[x_col].min()
+                            max_date = df[x_col].max().date() if hasattr(df[x_col].max(), 'date') else df[x_col].max()
+                            c1, c2 = st.columns(2)
+                            with c1: user_x_min = st.date_input("開始日期", min_date)
+                            with c2: user_x_max = st.date_input("結束日期", max_date)
+                        except: st.caption("無法自動偵測日期範圍")
+                    elif pd.api.types.is_numeric_dtype(df[x_col]):
+                        min_val = float(df[x_col].min())
+                        max_val = float(df[x_col].max())
+                        c1, c2 = st.columns(2)
+                        with c1: user_x_min = st.number_input("最小值", value=min_val)
+                        with c2: user_x_max = st.number_input("最大值", value=max_val)
+                    else: st.caption("此 X 軸為文字類別，不支援範圍縮放。")
+
+            if chart_type in ["長條圖 (Bar)", "折線圖 (Line)", "雙軸組合圖 (Combo)", "面積圖 (Area)"]:
+                with st.expander("📊 排序與參考線 (Sorting & Ref Line)", expanded=True):
+                    c1, c2 = st.columns(2)
+                    with c1: sort_order = st.selectbox("排序方式", sort_orders_list, index=st.session_state['sort_order_idx'], key='sort_order_box')
+                    with c2: ref_line_val = st.number_input("添加目標/參考線", value=st.session_state['ref_line_val'], step=1000.0, key='ref_line_box')
+            else: sort_order, ref_line_val = "預設 (依 X 軸)", 0.0
+
+            with st.expander("🔠 字體與軸設定", expanded=False):
+                col_f1, col_f2 = st.columns(2)
+                with col_f1:
+                    legend_font_size = st.slider("圖例文字大小", 10, 30, 14)
+                    legend_pos = st.selectbox("圖例位置", ["右側 (預設)", "上方", "下方", "隱藏"])
+                with col_f2:
+                    x_axis_font_size = st.slider("X 軸文字大小", 10, 30, 14)
+                    y_axis_font_size = st.slider("Y 軸文字大小", 10, 30, 14)
+
+            if chart_type in ["折線圖 (Line)", "散佈圖 (Scatter)"] or (chart_type == "雙軸組合圖 (Combo)" and ("折線圖" in type_L or "散佈圖" in type_L or "折線圖" in type_R or "散佈圖" in type_R)):
+                with st.expander("🔷 點的樣式 (Marker)", expanded=False): marker_size = st.slider("點的大小", 4, 25, 10)
+            else: marker_size = 10 
+
+            with st.expander("🔢 數值標籤 (Data Labels)", expanded=False):
+                show_label = st.checkbox("顯示圖中數字", value=True)
+                if show_label:
+                    c1, c2 = st.columns(2)
+                    with c1: decimal_places = st.selectbox("小數位數", [0, 1, 2, 3, 4], index=0)
+                    with c2: label_size = st.slider("數字大小", 10, 30, 16)
+                    label_position = st.selectbox("數字位置", ["上方 (Top)", "下方 (Bottom)", "置中 (Middle)", "自動 (Auto)"], index=0)
+                    text_format = f'.{decimal_places}f'
+                else: text_format, label_size, label_position = None, 14, "top center"
+
         if df is not None:
+            legend_config = dict(font=dict(size=legend_font_size))
+            if legend_pos == "右側 (預設)": legend_config.update(dict(orientation="v", yanchor="top", y=1, xanchor="left", x=1.02))
+            elif legend_pos == "上方": legend_config.update(dict(orientation="h", yanchor="bottom", y=1.02, xanchor="center", x=0.5))
+            elif legend_pos == "下方": legend_config.update(dict(orientation="h", yanchor="top", y=-0.2, xanchor="center", x=0.5))
+            elif legend_pos == "隱藏": legend_config.update(dict(visible=False))
+
+            pos_map_line = {"上方 (Top)": "top center", "下方 (Bottom)": "bottom center", "置中 (Middle)": "middle center", "自動 (Auto)": "top center"}
+            pos_map_bar = {"上方 (Top)": "outside", "下方 (Bottom)": "inside", "置中 (Middle)": "inside", "自動 (Auto)": "outside"}
+            plotly_pos_line = pos_map_line.get(label_position, "top center")
+            plotly_pos_bar = pos_map_bar.get(label_position, "outside")
+
+            layout_config = dict(font=dict(family=font_choice, size=18, color="#333"), title_font=dict(size=24), legend=legend_config, template="plotly_white", height=600, margin=dict(t=80, b=80, l=80, r=50))
+
+            def create_trace(sub_df, x_c, y_c, c_type, axis_name, color_code, show_txt, txt_fmt, m_size, opac=1.0):
+                common_args = dict(x=sub_df[x_c], y=sub_df[y_c], name=f"{y_c} ({axis_name})", text=sub_df[y_c] if show_txt else None, texttemplate=f'%{{text:{txt_fmt}}}' if show_txt else None, textfont=dict(size=label_size))
+                if "長條圖" in c_type: return go.Bar(**common_args, marker_color=color_code, opacity=opac, textposition=plotly_pos_bar, cliponaxis=False) 
+                elif "折線圖" in c_type:
+                    common_args['mode'] = 'lines+markers+text' if show_txt else 'lines+markers'
+                    trace = go.Scatter(**common_args, line=dict(width=3, color=color_code), marker=dict(size=m_size, symbol=marker_symbol))
+                    if show_txt: trace.update(textposition=plotly_pos_line) 
+                    return trace
+                elif "面積圖" in c_type: return go.Scatter(**common_args, fill='tozeroy', line=dict(width=2, color=color_code), mode='lines')
+                elif "散佈圖" in c_type:
+                    common_args['mode'] = 'markers+text' if show_txt else 'markers'
+                    trace = go.Scatter(**common_args, marker=dict(size=m_size, color=color_code, symbol=marker_symbol))
+                    if show_txt: trace.update(textposition=plotly_pos_line)
+                    return trace
+                return go.Bar(**common_args)
+
             try:
-                real_agg = {"總和 (Sum)": "sum", "平均 (Avg)": "mean", "最大值 (Max)": "max", "計數 (Count)": "count"}[agg_func]
-                use_raw = chart_type in RAW_DATA_CHARTS
-                
-                # Data Preparation
-                if use_raw: 
-                    df_agg = df.copy()
-                else:
-                    cols = [c for c in [x_col, color_col] if c != "(無)"]
-                    if not cols and chart_type != "樹狀圖 (TreeMap)":
-                        df_agg = None
-                    elif chart_type == "雙軸組合圖 (Combo)": 
-                        df_agg = df.groupby(cols, as_index=False)[[y_col, y_col_2]].agg(real_agg)
-                    elif chart_type == "樹狀圖 (TreeMap)": 
-                        df_agg = df.groupby(treemap_path, as_index=False)[y_col].agg(real_agg) if treemap_path else None
-                    else: 
-                        df_agg = df.groupby(cols, as_index=False)[y_col].agg(real_agg)
-
-                # Fix Numeric Date
-                if df_agg is not None and chart_type != "直方圖 (Histogram)" and x_col in df_agg.columns and pd.api.types.is_numeric_dtype(df_agg[x_col]):
-                    if 190000 < df_agg[x_col].mean() < 210012: df_agg[x_col] = df_agg[x_col].astype(str)
-
-                # Sorting
-                if chart_type in ["折線圖 (Line)", "面積圖 (Area)"] and df_agg is not None:
-                    df_agg = df_agg.sort_values(by=x_col)
-                elif not use_raw and df_agg is not None and chart_type not in ["樹狀圖 (TreeMap)", "雷達圖 (Radar)"]:
-                     idx = st.session_state.sort_order_idx
-                     if idx == 1: df_agg = df_agg.sort_values(by=y_col, ascending=False)
-                     elif idx == 2: df_agg = df_agg.sort_values(by=y_col, ascending=True)
-
-                # Plotting
-                if df_agg is not None:
-                    fig = None
-                    p = {"data_frame": df_agg, "x": x_col if x_col in df_agg.columns else None, "title": f"{chart_type}"}
-                    if color_col != "(無)": p["color"] = color_col
+                fig = None
+                if chart_type == "雙軸組合圖 (Combo)":
+                    grp_cols = [x_col]
+                    if color_col != "(無)" and color_col in df.columns: grp_cols.append(color_col)
                     
-                    if chart_type == "長條圖 (Bar)": fig = px.bar(**p, y=y_col, text_auto='.2s')
-                    elif chart_type == "折線圖 (Line)": fig = px.line(**p, y=y_col, markers=True)
-                    elif chart_type == "面積圖 (Area)": fig = px.area(**p, y=y_col)
-                    elif chart_type == "漏斗圖 (Funnel)": fig = px.funnel(**p, y=y_col)
-                    elif chart_type == "雙軸組合圖 (Combo)":
-                        fig = make_subplots(specs=[[{"secondary_y": True}]])
-                        fig.add_trace(go.Bar(x=df_agg[x_col], y=df_agg[y_col], name=y_col, marker_color='#636EFA', opacity=0.8), secondary_y=False)
-                        fig.add_trace(go.Scatter(x=df_agg[x_col], y=df_agg[y_col_2], name=y_col_2, mode='lines+markers', line=dict(color='#EF553B', width=3)), secondary_y=True)
-                    elif chart_type == "圓餅圖 (Pie)": fig = px.pie(df_agg, values=y_col, names=x_col)
-                    elif chart_type == "樹狀圖 (TreeMap)": fig = px.treemap(df_agg, path=treemap_path, values=y_col)
-                    elif chart_type == "雷達圖 (Radar)": fig = px.line_polar(df_agg, r=y_col, theta=x_col, line_close=True, title="Radar")
-                    elif chart_type == "直方圖 (Histogram)": fig = px.histogram(df_agg, x=x_col, color=p.get("color"))
-                    elif chart_type == "箱型圖 (Box Plot)": fig = px.box(df_agg, x=x_col, y=y_col, color=p.get("color"))
-                    elif chart_type == "散佈圖 (Scatter)": fig = px.scatter(df_agg, x=x_col, y=y_col, color=p.get("color"))
-
-                    if fig:
-                        fig.update_layout(template="plotly_white", height=500, margin=dict(t=30, b=50, l=50, r=50), font=dict(family=font_choice.split(',')[0].strip("'"), size=16), hovermode="x unified")
-                        st.plotly_chart(fig, use_container_width=True)
-                else:
-                    st.info("請選擇正確的 X/Y 軸欄位以生成圖表")
-
-            except Exception as e: 
-                # [V140 Fix] 顯示更詳細的錯誤，避免只顯示 None
-                st.error(f"繪圖發生錯誤: {repr(e)}")
-
-        # =========================================================
-        # 🚀 [Lyra V140] AI 按鈕區 (完全透過 Index 同步)
-        # =========================================================
-        st.markdown("---")
-        st.subheader("🤖 AI 戰略分析面板")
-        st.caption("👇 捲動挑選 (已修復同步問題)")
-
-        with st.container(height=300):
-            if st.session_state.get('gemini_api_key'):
-                if 'last_analyzed_file' not in st.session_state or st.session_state['last_analyzed_file'] != selected_file_name:
-                    with st.spinner("🧠 正在掃描全域數據特徵..."):
-                        insights, error_msg = analyze_with_gemini(df, st.session_state['gemini_api_key'])
-                        if not error_msg:
-                            st.session_state['ai_insights'] = insights
-                            st.session_state['last_analyzed_file'] = selected_file_name
-                
-                if st.session_state.get('ai_insights'):
-                    insights = st.session_state['ai_insights']
-                    groups = sorted(list(set(ins['group'] for ins in insights)))
+                    metrics = [y_col]
+                    if y_col_2 != y_col: metrics.append(y_col_2)
+                        
+                    df_agg = df.groupby(grp_cols, as_index=False)[metrics].agg(agg_func)
                     
-                    for group_name in groups:
-                        st.markdown(f"<div class='group-header'>{group_name}</div>", unsafe_allow_html=True)
-                        cols = st.columns(5)
-                        group_insights = [ins for ins in insights if ins['group'] == group_name]
-                        for i, insight in enumerate(group_insights):
-                            with cols[i % 5]:
-                                if st.button(f"📊 {insight['title']}", key=f"btn_{group_name}_{i}", use_container_width=True):
-                                    raw = insight.get('chart_type', '')
-                                    matched = "長條圖 (Bar)"
-                                    for t in CHART_TYPES:
-                                        if any(k.strip("()") in raw for k in t.split(' ') if len(k)>2):
-                                            matched = t; break
-                                    
-                                    # [V140 Fix] 這裡只更新 Index，不碰 Widget Key
-                                    st.session_state.chart_type_idx = safe_index(matched, CHART_TYPES)
-                                    st.session_state.x_col_idx = safe_index(insight.get('x_col'), all_cols)
-                                    st.session_state.y_col_idx = safe_index(insight.get('y_col'), num_cols)
-                                    st.session_state.color_col_idx = safe_index(insight.get('color_col'), ["(無)"]+all_cols)
-                                    
-                                    sort = insight.get('sort', 'none')
-                                    st.session_state.sort_order_idx = 1 if sort=='desc' else 2 if sort=='asc' else 0
-                                    
-                                    if matched == "樹狀圖 (TreeMap)" and insight.get('x_col'):
-                                        st.session_state.treemap_path = [insight.get('x_col')]
-                                    
-                                    st.rerun()
-            else:
-                st.warning("請在左側輸入 Gemini API Key 以啟動分析面板")
+                    if sort_order == "數值由大到小 (Desc)": df_agg = df_agg.sort_values(by=y_col, ascending=False)
+                    elif sort_order == "數值由小到大 (Asc)": df_agg = df_agg.sort_values(by=y_col, ascending=True)
+
+                    fig = make_subplots(specs=[[{"secondary_y": True}]])
+                    
+                    if color_col != "(無)" and color_col in df.columns and "長條圖" in type_L:
+                        for c in df_agg[color_col].unique():
+                            subset = df_agg[df_agg[color_col] == c]
+                            fig.add_trace(go.Bar(x=subset[x_col], y=subset[y_col], name=f"{c}-{y_col}", text=subset[y_col] if show_label else None, texttemplate=f'%{{text:{text_format}}}' if show_label else None, textfont=dict(size=label_size), opacity=0.7, textposition=plotly_pos_bar, cliponaxis=False), secondary_y=False)
+                    else:
+                        trace_L = create_trace(df_agg, x_col, y_col, type_L, "左軸", '#636EFA', show_label, text_format, marker_size, 0.7)
+                        fig.add_trace(trace_L, secondary_y=False)
+                    
+                    if y_col_2 in df_agg.columns:
+                        trace_R = create_trace(df_agg, x_col, y_col_2, type_R, "右軸", '#EF553B', show_label, text_format, marker_size, 0.9)
+                        fig.add_trace(trace_R, secondary_y=True)
+                        
+                    fig.update_layout(title=f"自由雙軸分析: {y_col} vs {y_col_2}")
+
+                elif chart_type in ["長條圖 (Bar)", "折線圖 (Line)", "面積圖 (Area)", "漏斗圖 (Funnel)", "雷達圖 (Radar)"]:
+                    grp_cols = [x_col]
+                    if color_col != "(無)" and color_col in df.columns: grp_cols.append(color_col)
+                    if facet_col and facet_col != "(無)" and facet_col in df.columns: grp_cols.append(facet_col)
+                    df_agg = df.groupby(grp_cols, as_index=False)[y_col].agg(agg_func)
+                    if sort_order == "數值由大到小 (Desc)": df_agg = df_agg.sort_values(by=y_col, ascending=False)
+                    elif sort_order == "數值由小到大 (Asc)": df_agg = df_agg.sort_values(by=y_col, ascending=True)
+                    
+                    params = {"data_frame": df_agg, "x": x_col, "y": y_col, "title": f"{y_col} 分析"}
+                    if color_col != "(無)" and color_col in df.columns: params["color"] = color_col
+                    if facet_col and facet_col != "(無)" and facet_col in df.columns: params["facet_col"] = facet_col
+                    if show_label: params["text"] = y_col
+                    if "長條圖" in chart_type:
+                        fig = px.bar(**params)
+                        if show_label: fig.update_traces(texttemplate=f'%{{text:{text_format}}}', textposition=plotly_pos_bar, textfont_size=label_size, cliponaxis=False)
+                    elif "折線圖" in chart_type:
+                        fig = px.line(**params, markers=True)
+                        fig.update_traces(marker_symbol=marker_symbol, marker_size=marker_size, line_width=3)
+                        if show_label: fig.update_traces(texttemplate=f'%{{text:{text_format}}}', textposition=plotly_pos_line, textfont_size=label_size)
+                    elif "面積圖" in chart_type: fig = px.area(**params)
+                    elif "漏斗圖" in chart_type:
+                        fig = px.funnel(**params)
+                        if show_label: fig.update_traces(textinfo="value", texttemplate=f'%{{value:{text_format}}}', textfont_size=label_size)
+                    elif "雷達圖" in chart_type:
+                        fig = px.line_polar(df_agg, r=y_col, theta=x_col, line_close=True, color=color_col if color_col != "(無)" and color_col in df.columns else None, title=params['title'])
+                        fig.update_traces(fill='toself')
+
+                elif chart_type == "樹狀圖 (TreeMap)":
+                    if not treemap_path: st.warning("請至少選擇一個層級欄位")
+                    else:
+                        df_agg = df.groupby(treemap_path, as_index=False)[y_col].agg(agg_func)
+                        fig = px.treemap(df, path=treemap_path, values=y_col, color=color_col if color_col != "(無)" and color_col in df.columns else y_col, title=f"層級分析: {' > '.join(treemap_path)}")
+                        fig.update_traces(textinfo="label+value+percent entry")
+                elif chart_type == "箱型圖 (Box Plot)":
+                    params = {"data_frame": df, "x": x_col, "y": y_col, "title": f"{y_col} 分佈情形"}
+                    if color_col != "(無)" and color_col in df.columns: params["color"] = color_col
+                    fig = px.box(**params)
+                elif chart_type == "圓餅圖 (Pie)":
+                    df_agg = df.groupby(x_col, as_index=False)[y_col].agg(agg_func)
+                    fig = px.pie(df_agg, values=y_col, names=x_col, title=f"{x_col} 佔比")
+                    info_mode = 'percent+label'
+                    if show_label: info_mode += '+value'
+                    fig.update_traces(textposition='inside', textinfo=info_mode, textfont_size=label_size)
+                elif chart_type == "散佈圖 (Scatter)":
+                    params = {"data_frame": df, "x": x_col, "y": y_col, "title": f"{x_col} vs {y_col}"}
+                    if color_col != "(無)" and color_col in df.columns: params["color"] = color_col
+                    fig = px.scatter(**params)
+                    fig.update_traces(marker_symbol=marker_symbol, marker_size=marker_size)
+                    if show_label: fig.update_traces(text=df[y_col], textposition=plotly_pos_line, textfont_size=label_size)
+                elif chart_type == "直方圖 (Histogram)":
+                    params = {"data_frame": df, "x": x_col, "title": f"{x_col} 分佈"}
+                    if color_col != "(無)" and color_col in df.columns: params["color"] = color_col
+                    fig = px.histogram(**params)
+
+                if fig:
+                    fig.update_layout(**layout_config)
+                    fig.update_xaxes(tickfont=dict(size=x_axis_font_size), title_font=dict(size=x_axis_font_size+4))
+                    fig.update_yaxes(tickfont=dict(size=y_axis_font_size), title_font=dict(size=y_axis_font_size+4))
+                    if user_x_min is not None and user_x_max is not None: fig.update_xaxes(range=[user_x_min, user_x_max])
+                    if chart_type != "圓餅圖 (Pie)" and chart_type != "樹狀圖 (TreeMap)" and ref_line_val > 0:
+                        fig.add_hline(y=ref_line_val, line_dash="dash", line_color="red", annotation_text=f"Target: {ref_line_val}", annotation_position="top left", annotation_font=dict(size=14, color="red"))
+                    if sort_order != "預設 (依 X 軸)": fig.update_xaxes(type='category')
+                    
+                    config = {'toImageButtonOptions': {'format': 'png', 'filename': '4k_chart_export', 'height': 1080, 'width': 1920, 'scale': 2 }, 'displayModeBar': True }
+                    st.plotly_chart(fig, use_container_width=True, config=config)
+                    
+                    col_d1, col_d2 = st.columns([1, 4])
+                    with col_d1:
+                        buffer = io.StringIO()
+                        fig.write_html(buffer, include_plotlyjs='cdn')
+                        html_bytes = buffer.getvalue().encode()
+                        st.download_button("📥 下載互動式 HTML", data=html_bytes, file_name="chart.html", mime="text/html")
+                    with col_d2:
+                            st.success("✨ **分析完成**：點擊上方的「戰略分析建議」可快速切換不同視角。")
+                    with st.expander("查看數據表"):
+                        if 'df_agg' in locals(): st.dataframe(df_agg, use_container_width=True)
+                        else: st.dataframe(df.head(100), use_container_width=True)
+            except Exception as e:
+                st.error(f"發生錯誤: {e}")
+else:
+    st.info("👋 歡迎使用作圖小工具，請上傳 Excel 開始。")
