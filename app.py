@@ -85,7 +85,7 @@ def inject_custom_css(font_family):
     """, unsafe_allow_html=True)
 
 # ==========================================
-# 2. 核心功能：Gemini AI 分析引擎
+# 2. 核心功能：Gemini AI 分析引擎 (智慧適應版)
 # ==========================================
 
 def get_valid_model():
@@ -116,17 +116,13 @@ def analyze_with_gemini(df, api_key):
                 "dtype": dtype,
                 "n_unique": n_unique
             }
-            # 偵測數值
             if pd.api.types.is_numeric_dtype(df[col]) and n_unique > 0:
                 col_profile["min"] = float(df[col].min())
                 col_max = float(df[col].max())
                 col_profile["max"] = col_max
-                
-                # 簡單偵測是否為時間序列 (YYYYMM)
                 if (col_max > 190000 and col_max < 210012):
                     col_profile["semantic"] = "TIME_SERIES"
             
-            # 採樣
             try: col_profile["samples"] = df[col].dropna().astype(str).sample(min(3, len(df))).tolist()
             except: col_profile["samples"] = []
             
@@ -134,10 +130,11 @@ def analyze_with_gemini(df, api_key):
 
         columns_summary = json.dumps(stats_info, ensure_ascii=False, indent=2)
         
-        # --- [Lyra Architect Prompt V80 - Enhanced] ---
+        # --- [Lyra Architect Prompt V80 - Smart Adaptive] ---
+        # 這裡改回比較有彈性的指令，但告訴 AI 如果看到特定特徵，要積極使用進階圖表
         prompt = f"""
         <role>
-        你是一位全能的數據視覺化專家。請分析以下數據結構，並產生涵蓋 **11 種不同圖表類型** 的分析建議。
+        你是一位全能的數據視覺化專家。請分析以下數據結構，並挖掘多維度 Insight。
         </role>
 
         <data_profile>
@@ -146,33 +143,37 @@ def analyze_with_gemini(df, api_key):
 
         <chart_catalog>
         標準名稱 (嚴格遵守):
-        1. "長條圖 (Bar)": 用於比較分類數據。
-        2. "折線圖 (Line)": 用於時間趨勢 (TIME_SERIES)。
-        3. "面積圖 (Area)": 用於累積趨勢。
-        4. "圓餅圖 (Pie)": 用於佔比 (分類數 < 10)。
-        5. "雙軸組合圖 (Combo)": 必備！當有兩個數值欄位 (如: 銷售額 & 毛利率) 時使用。
-        6. "散佈圖 (Scatter)": 用於看兩個數值的相關性。
-        7. "箱型圖 (Box Plot)": 用於看分佈與離群值。
-        8. "直方圖 (Histogram)": 用於看單一數值頻率分佈。
-        9. "漏斗圖 (Funnel)": 當欄位包含 "階段"、"Stage" 或像漏斗的流程時使用。
-        10. "樹狀圖 (TreeMap)": 當有 "層級" 關係 (如: 地區->城市, 類別->子類別) 時使用。
-        11. "雷達圖 (Radar)": 當有多個評分指標 (如: 滿意度、效能、外觀) 時使用。
+        1. "長條圖 (Bar)": 比較分類。
+        2. "折線圖 (Line)": 時間趨勢。
+        3. "面積圖 (Area)": 累積趨勢。
+        4. "圓餅圖 (Pie)": 佔比 (分類<10)。
+        5. "雙軸組合圖 (Combo)": 雙數值對比 (如: 銷售 & 毛利)。
+        6. "散佈圖 (Scatter)": 變數相關性。
+        7. "箱型圖 (Box Plot)": 分佈與離群值。
+        8. "直方圖 (Histogram)": 數值頻率。
+        9. "漏斗圖 (Funnel)": 流程轉化 (如: 階段)。
+        10. "樹狀圖 (TreeMap)": 層級結構 (如: 地區/產品分類)。
+        11. "雷達圖 (Radar)": 多維能力評分。
         </chart_catalog>
 
-        <requirements>
-        請生成 **22 個** 建議，並盡可能覆蓋上述所有圖表類型：
-        1. **必須包含** 至少 1 個 "漏斗圖" (若有階段欄位)。
-        2. **必須包含** 至少 1 個 "樹狀圖" (若有層級特徵)。
-        3. **必須包含** 至少 1 個 "雷達圖" (若有評分欄位)。
-        4. **必須包含** 至少 1 個 "雙軸組合圖"。
-        5. 時間欄位優先使用 "折線圖" 或 "面積圖"。
-        </requirements>
+        <strategy>
+        請生成 **20 個** 建議。遵循以下「適應性原則」：
+        1. **優先偵測特殊圖表**：
+           - 若發現「階段、流程、Stage」欄位 -> **務必**生成 "漏斗圖"。
+           - 若發現「評分、Score、能力」多欄位 -> **務必**生成 "雷達圖"。
+           - 若發現「層級關係 (大類/子類, 區域/城市)」 -> **務必**生成 "樹狀圖"。
+        2. **穩健基礎**：
+           - 若無上述特徵，請專注於 "長條圖"、"折線圖"、"雙軸組合圖" 與 "散佈圖" 的深入分析。
+           - 不要為了多樣性而強行使用不適合的圖表 (例如：不要對純時間序列使用漏斗圖)。
+        3. **必備檢查**：
+           - 任何數值分佈分析，請至少提供 1 個 "箱型圖"。
+        </strategy>
 
         <output_format>
         回傳純 JSON Array (無 Markdown):
         [
           {{
-            "group": "群組名稱 (例如: 趨勢分析, 結構分析, 漏斗分析)",
+            "group": "群組名稱",
             "title": "標題 (Max 10字)",
             "chart_type": "Chart Catalog 中的標準名稱",
             "x_col": "欄位名",
@@ -202,15 +203,13 @@ def analyze_with_gemini(df, api_key):
 
 @st.cache_data
 def generate_demo_excel():
-    # [超級測試資料產生器]
     rows = 800
     start_date = datetime(2023, 1, 1)
     
-    # 1. 基礎欄位
     dates = [start_date + timedelta(days=random.randint(0, 365)) for _ in range(rows)]
     ym_int = [int(d.strftime('%Y%m')) for d in dates]
     
-    # 2. 層級資料 (For TreeMap)
+    # 層級資料 (For TreeMap)
     regions = ['北區', '中區', '南區']
     cities_map = {
         '北區': ['台北市', '新北市', '基隆市'],
@@ -225,38 +224,33 @@ def generate_demo_excel():
         row_regions.append(r)
         row_cities.append(c)
 
-    # 3. 漏斗資料 (For Funnel)
-    # 模擬隨機分佈，但保持數量級差異以形成漏斗狀
+    # 漏斗資料 (For Funnel)
     stages = ['1_瀏覽商品', '2_加入購物車', '3_結帳流程', '4_完成訂單']
     weights = [0.4, 0.3, 0.2, 0.1]
     row_stages = random.choices(stages, weights=weights, k=rows)
 
-    # 4. 雷達圖評分資料 (For Radar)
-    # 產品類別與對應的假想評分
+    # 雷達圖評分資料 (For Radar)
     products = ['旗艦機 Pro', '輕旗艦 Air', '入門機 SE', '電競機 GT']
     row_products = [random.choice(products) for _ in range(rows)]
     
-    # 5. 數值資料 (For Scatter, Box, Combo)
     prices = np.random.randint(5000, 40000, rows)
     units = np.random.randint(1, 10, rows)
     sales = prices * units
-    margins = np.random.uniform(0.1, 0.4, rows) # 毛利率
+    margins = np.random.uniform(0.1, 0.4, rows)
     profit = sales * margins
     
-    # 產生 DataFrame
     df = pd.DataFrame({
         '訂單日期': dates,
         '年月份': ym_int,
-        '大區域': row_regions,   # For TreeMap
-        '城市': row_cities,       # For TreeMap
+        '大區域': row_regions,
+        '城市': row_cities,
         '產品型號': row_products,
-        '銷售階段': row_stages,   # For Funnel
-        '訂單金額': sales,        # For Bar, Line
-        '訂單利潤': profit,       # For Combo (Secondary Y)
-        '毛利率': margins,        # For Combo
-        '折扣率': np.random.choice([0, 0.05, 0.1, 0.2], rows), # For Histogram (Discrete)
+        '銷售階段': row_stages,
+        '訂單金額': sales,
+        '訂單利潤': profit,
+        '毛利率': margins,
+        '折扣率': np.random.choice([0, 0.05, 0.1, 0.2], rows),
         '運送天數': np.random.randint(1, 7, rows),
-        # 以下為雷達圖專用指標 (平均後使用)
         '效能評分': np.random.randint(6, 10, rows),
         '外觀評分': np.random.randint(5, 10, rows),
         'CP值評分': np.random.randint(4, 10, rows),
@@ -264,7 +258,6 @@ def generate_demo_excel():
         '續航評分': np.random.randint(5, 10, rows)
     })
     
-    # 製造一些離群值 (For Box Plot)
     df.loc[0:5, '訂單金額'] = df.loc[0:5, '訂單金額'] * 5 
     
     output = io.BytesIO()
