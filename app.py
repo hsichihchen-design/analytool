@@ -14,7 +14,7 @@ import json
 # 0. 初始化 Session State
 # ==========================================
 default_states = {
-    'menu_id': 0, # [關鍵修復] 用來強制刷新 Sidebar 元件的計數器
+    'menu_id': 0, 
     'chart_type_idx': 0, 
     'x_col_idx': 0,
     'y_col_idx': 0,
@@ -33,7 +33,7 @@ for key, value in default_states.items():
         st.session_state[key] = value
 
 # ==========================================
-# 1. 全域設定與 CSS
+# 1. 全域設定與 CSS (空間優化版)
 # ==========================================
 st.set_page_config(page_title="作圖小工具 V80 (Lyra Time-Keeper)", layout="wide", page_icon="✨")
 
@@ -50,25 +50,37 @@ def inject_custom_css(font_family):
     <style>
         {google_font_import}
         html, body, [class*="css"] {{ font-family: {font_css_rule} !important; }}
+        
+        /* [核心修改] 極限壓縮頂部留白，讓內容往上提 */
+        .block-container {{
+            padding-top: 1rem !important;
+            padding-bottom: 0rem !important;
+        }}
+        
+        /* 隱藏預設的 Header 裝飾線，爭取更多空間 */
+        header {{ visibility: hidden; }}
+        
         .stDownloadButton button {{ width: 100%; border-color: #4CAF50; color: #4CAF50; }}
+        
         div.stButton > button {{
-            width: 100%; min-height: 45px; height: 100%; white-space: normal; word-wrap: break-word;
-            padding: 4px 6px; line-height: 1.2; border-radius: 4px; border: 1px solid #ddd;
+            width: 100%; min-height: 40px; height: 100%; white-space: normal; word-wrap: break-word;
+            padding: 2px 6px; line-height: 1.1; border-radius: 4px; border: 1px solid #ddd;
             background-color: #ffffff; text-align: left; display: flex; align-items: center;
             font-size: 0.8rem; box-shadow: 0 1px 1px rgba(0,0,0,0.05);
             font-family: {font_css_rule} !important;
         }}
+        
         div.stButton > button:hover {{
             border-color: #7c4dff; color: #7c4dff; background-color: #f8f5ff;
             transform: translateY(-1px); z-index: 1;
         }}
+        
         .group-header {{
-            font-weight: 700; font-size: 0.9rem; color: #666;
-            margin-top: 15px; margin-bottom: 5px; padding-bottom: 2px;
+            font-weight: 700; font-size: 0.85rem; color: #666;
+            margin-top: 10px; margin-bottom: 5px; padding-bottom: 2px;
             border-bottom: 1px solid #eee;
             font-family: {font_css_rule} !important;
         }}
-        .block-container {{ padding-top: 3.5rem; }}
     </style>
     """, unsafe_allow_html=True)
 
@@ -222,9 +234,11 @@ def load_data(file):
 # ==========================================
 # 4. 主介面
 # ==========================================
-st.title("✨ 作圖小工具 (Lyra V80)")
+# 移除 st.title 來節省空間，改用 Sidebar 顯示標題
+# st.title("✨ 作圖小工具 (Lyra V80)") 
 
 with st.sidebar:
+    st.markdown("### ✨ Lyra V80") # 標題移到這裡
     st.header("1. 資料來源")
     st.session_state['gemini_api_key'] = st.text_input("🔑 Gemini API Key", value=st.session_state['gemini_api_key'], type="password")
     
@@ -237,8 +251,8 @@ with st.sidebar:
             except Exception as e: st.error(f"連線失敗: {e}")
 
     st.markdown("---")
-    with st.expander("📥 範例資料 (含離群值)"):
-        if st.button("🎲 生成 V80 測試資料"):
+    with st.expander("📥 範例資料"):
+        if st.button("🎲 生成測試資料"):
             st.download_button("📊 下載 Excel", generate_demo_excel(), "Demo_Data.xlsx")
 
     font_choice = st.selectbox("字體", ["Noto Sans TC (推薦)", "Microsoft JhengHei", "Arial"], index=0)
@@ -276,8 +290,6 @@ if uploaded_files:
             st.markdown("---")
             st.header("2. 繪圖設定")
             
-            # [核心修正] 使用 menu_id 讓 Key 動態變化，強制 Streamlit 刷新 Widget
-            # 當使用者點擊 AI 按鈕 -> menu_id + 1 -> Key 改變 -> Widget 重新讀取 index
             uid = st.session_state['menu_id']
 
             def update_idx(key_name, options_list):
@@ -290,13 +302,12 @@ if uploaded_files:
             chart_type = st.selectbox(
                 "圖表類型", CHART_TYPES, 
                 index=chart_type_idx, 
-                key=f"chart_type_{uid}" # Dynamic Key
+                key=f"chart_type_{uid}"
             )
-            # 即時同步手動變更回 State
             if chart_type in CHART_TYPES:
                 st.session_state['chart_type_idx'] = CHART_TYPES.index(chart_type)
 
-            # UI 條件渲染 (全都加上 uid 確保刷新)
+            # UI 條件渲染
             if chart_type == "雙軸組合圖 (Combo)":
                 x_col = st.selectbox("X 軸", all_cols, index=update_idx('x_col', all_cols), key=f'x_col_{uid}')
                 y_col = st.selectbox("左軸數值", num_cols, index=update_idx('y_col', num_cols), key=f'y_col_{uid}')
@@ -320,7 +331,7 @@ if uploaded_files:
                 agg_func = st.selectbox("計算", agg_funcs_list, index=update_idx('agg_func', agg_funcs_list), key=f'agg_func_{uid}')
                 color_col = st.selectbox("分組", ["(無)"] + all_cols, index=update_idx('color_col', ["(無)"]+all_cols), key=f'color_col_{uid}')
             
-            # 手動同步邏輯 (讓 manual change 寫入 state)
+            # 手動同步邏輯
             if 'x_col' in locals() and x_col in all_cols: st.session_state['x_col_idx'] = all_cols.index(x_col)
             if 'y_col' in locals() and y_col in num_cols: st.session_state['y_col_idx'] = num_cols.index(y_col)
             if 'y_col_2' in locals() and y_col_2 in num_cols: st.session_state['y_col_2_idx'] = num_cols.index(y_col_2)
@@ -329,7 +340,7 @@ if uploaded_files:
             if 'treemap_path' in locals(): st.session_state['treemap_path'] = treemap_path
 
         # ==========================================
-        # 5. 優先執行繪圖引擎 (Render Chart First)
+        # 5. 優先執行繪圖引擎
         # ==========================================
         current_chart_fig = None
         
@@ -337,7 +348,6 @@ if uploaded_files:
             agg_map = {"總和 (Sum)": "sum", "平均 (Avg)": "mean", "最大值 (Max)": "max", "計數 (Count)": "count"}
             real_agg = agg_map[agg_func]
             
-            # 數據分流
             use_raw_data = chart_type in RAW_DATA_CHARTS
             
             if use_raw_data:
@@ -359,13 +369,11 @@ if uploaded_files:
                     if color_col != "(無)": grp_cols.append(color_col)
                     df_agg = df.groupby(grp_cols, as_index=False)[y_col].agg(real_agg)
 
-            # [Lyra Logic] X 軸數值型日期轉字串 (防斷層)
             if df_agg is not None and x_col in df_agg.columns and pd.api.types.is_numeric_dtype(df_agg[x_col]):
                 col_mean = df_agg[x_col].mean()
                 if (1900 < col_mean < 2100) or (190000 < col_mean < 210012):
                     df_agg[x_col] = df_agg[x_col].astype(str)
 
-            # [Lyra V80 Feature] 時序鎖定 (Chronological Lock)
             if chart_type in ["折線圖 (Line)", "面積圖 (Area)"] and df_agg is not None:
                 df_agg = df_agg.sort_values(by=x_col, ascending=True)
             elif not use_raw_data and df_agg is not None and chart_type not in ["樹狀圖 (TreeMap)", "雷達圖 (Radar)"]:
@@ -373,7 +381,6 @@ if uploaded_files:
                 if sort_idx == 1: df_agg = df_agg.sort_values(by=y_col, ascending=False)
                 elif sort_idx == 2: df_agg = df_agg.sort_values(by=y_col, ascending=True)
 
-            # 開始繪圖
             if df_agg is not None:
                 common_params = {"data_frame": df_agg, "x": x_col if x_col in df_agg.columns else None, "title": f"{chart_type}: {x_col if x_col else ''}"}
                 if color_col != "(無)" and color_col in df_agg.columns: common_params["color"] = color_col
@@ -411,18 +418,22 @@ if uploaded_files:
         # -------------------------------------------------------
         # [UI 優化] 顯示圖表 (Hero Section)
         # -------------------------------------------------------
+        # [空間魔術]：將圖表高度從 500 改為 450，保持視覺效果但省空間
         if current_chart_fig:
-            current_chart_fig.update_layout(template="plotly_white", height=500, font=dict(family=font_choice.split(',')[0].strip("'"), size=16), hovermode="x unified")
+            current_chart_fig.update_layout(
+                template="plotly_white", 
+                height=450, # 調整後高度
+                margin=dict(t=30, b=10), # 縮減圖表自身的邊界
+                font=dict(family=font_choice.split(',')[0].strip("'"), size=16), 
+                hovermode="x unified"
+            )
             st.plotly_chart(current_chart_fig, use_container_width=True)
         else:
             st.info("👈 請從左側選擇圖表類型，或等待下方 AI 產生建議。")
 
-        st.markdown("---")
-
         # ==========================================
         # 6. AI 分析與控制面板 (Controls Section)
         # ==========================================
-        st.subheader("🤖 Lyra 深度分析建議")
         
         if st.session_state['gemini_api_key']:
             if 'last_analyzed_file' not in st.session_state or st.session_state['last_analyzed_file'] != selected_file_name:
@@ -436,8 +447,11 @@ if uploaded_files:
                 insights = st.session_state['ai_insights']
                 groups = sorted(list(set(ins['group'] for ins in insights)))
                 
-                with st.container(height=450, border=True):
-                    st.caption("點擊按鈕，上方圖表將自動切換：")
+                # ★ [空間魔術]：將容器高度限制在 200px。
+                # 這裡會形成一個內部 Scrollbar，使用者可以在這個小區域內捲動找按鈕，
+                # 但整個瀏覽器視窗不會產生 Scrollbar。
+                st.markdown(f"**🤖 AI 深度分析建議** (共 {len(insights)} 項)")
+                with st.container(height=200, border=True):
                     
                     for group_name in groups:
                         st.markdown(f"<div class='group-header'>{group_name}</div>", unsafe_allow_html=True)
@@ -455,7 +469,6 @@ if uploaded_files:
                                             matched_type = standard_type
                                             break
                                     
-                                    # 更新 State _idx
                                     try: st.session_state['chart_type_idx'] = CHART_TYPES.index(matched_type)
                                     except: st.session_state['chart_type_idx'] = 0
 
@@ -478,7 +491,6 @@ if uploaded_files:
                                     if matched_type == "樹狀圖 (TreeMap)" and insight.get('x_col'):
                                          st.session_state['treemap_path'] = [insight.get('x_col')]
                                     
-                                    # [關鍵修正] 強制 State ID + 1 -> 迫使 Sidebar 元件重建 -> 讀取新的 index
                                     st.session_state['menu_id'] += 1
                                     
                                     st.rerun()
