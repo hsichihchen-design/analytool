@@ -11,27 +11,34 @@ import google.generativeai as genai
 import json
 
 # ==========================================
-# 0. 初始化 Session State (簡化版)
+# 0. 全域設定與 Helper Functions
 # ==========================================
-# 我們不再追蹤 index，直接追蹤數值 (Value)，避免狀態不同步
-default_keys = [
-    'chart_type_box', 'x_col_box', 'y_col_box', 'y_col_2_box', 
-    'color_col_box', 'agg_func_box', 'treemap_box', 
-    'gemini_api_key', 'ai_insights', 'last_analyzed_file'
+st.set_page_config(page_title="作圖小工具 V140", layout="wide", page_icon="✨")
+
+# 安全獲取 Index 的小工具
+def safe_index(val, options):
+    try: return options.index(val)
+    except: return 0
+
+# ==========================================
+# 1. 初始化 Session State (索引驅動核心)
+# ==========================================
+# 我們只追蹤 IDX (整數索引)，這是最穩定的方式
+state_keys = [
+    'chart_type_idx', 'x_col_idx', 'y_col_idx', 'y_col_2_idx', 
+    'color_col_idx', 'agg_func_idx', 'sort_order_idx',
+    'treemap_path', 'gemini_api_key', 'ai_insights', 'last_analyzed_file'
 ]
 
-for key in default_keys:
+for key in state_keys:
     if key not in st.session_state:
-        if 'box' in key: st.session_state[key] = None # 選單類預設 None
-        elif 'key' in key: st.session_state[key] = ''
-        elif 'insights' in key: st.session_state[key] = []
-        else: st.session_state[key] = ''
+        if 'idx' in key: st.session_state[key] = 0
+        elif 'path' in key: st.session_state[key] = []
+        else: st.session_state[key] = None
 
 # ==========================================
-# 1. 全域設定與 CSS (V130 Layout Fix)
+# 2. CSS 樣式 (V140 Layout)
 # ==========================================
-st.set_page_config(page_title="作圖小工具 V130", layout="wide", page_icon="✨")
-
 def inject_custom_css(font_family):
     google_font_import = ""
     font_css_rule = font_family
@@ -46,8 +53,8 @@ def inject_custom_css(font_family):
         {google_font_import}
         html, body, [class*="css"] {{ font-family: {font_css_rule} !important; }}
         
-        /* [V130 Fix] 增加頂部留白，避免標題被遮擋 */
-        .block-container {{ padding-top: 3.5rem; padding-bottom: 2rem; }}
+        /* 確保頂部留白足夠，標題不被遮擋 */
+        .block-container {{ padding-top: 3rem; padding-bottom: 2rem; }}
         
         div.stButton > button {{
             width: 100%; min-height: 45px; height: 100%; 
@@ -78,7 +85,7 @@ def inject_custom_css(font_family):
     """, unsafe_allow_html=True)
 
 # ==========================================
-# 2. Gemini AI 引擎
+# 3. Gemini AI 引擎
 # ==========================================
 def get_valid_model():
     try:
@@ -140,7 +147,7 @@ def analyze_with_gemini(df, api_key):
     except Exception as e: return None, f"AI 分析失敗: {str(e)}"
 
 # ==========================================
-# 3. 資料載入與模擬
+# 4. 資料載入
 # ==========================================
 @st.cache_data
 def generate_demo_excel():
@@ -154,7 +161,6 @@ def generate_demo_excel():
         '區域': [random.choice(['北區', '中區', '南區', '東區']) for _ in range(rows)],
         '滿意度': np.random.randint(1, 10, rows),
         '產品評分': np.random.normal(7, 1.5, rows).clip(1, 10), 
-        '物流評分': np.random.normal(8, 1, rows).clip(1, 10),
         '單價': np.random.randint(5000, 30000, rows),
         '銷量': np.random.randint(1, 50, rows)
     })
@@ -175,19 +181,19 @@ def load_data(file):
     except: return None
 
 # ==========================================
-# 4. 主介面 (V130 Robust Layout)
+# 5. 主介面 (V140 Two-Way Binding Architecture)
 # ==========================================
-st.title("✨ 作圖小工具 (Lyra V130)")
+st.title("✨ 作圖小工具 (Lyra V140)")
 
 # --- Sidebar ---
 with st.sidebar:
     st.header("1. 資料來源")
-    st.session_state['gemini_api_key'] = st.text_input("🔑 Gemini Key", value=st.session_state['gemini_api_key'], type="password")
+    st.session_state['gemini_api_key'] = st.text_input("🔑 Gemini Key", value=st.session_state.get('gemini_api_key',''), type="password")
     if st.button("✅ 連線"): 
         if st.session_state['gemini_api_key']: st.success("已連線")
     
     st.markdown("---")
-    if st.button("🎲 生成 V130 測試資料"):
+    if st.button("🎲 生成測試資料"):
         st.download_button("📊 下載 Excel", generate_demo_excel(), "Demo_Data.xlsx")
     
     font_choice = st.selectbox("字體", ["Noto Sans TC (推薦)", "Microsoft JhengHei", "Arial"], index=0)
@@ -205,46 +211,58 @@ if uploaded_files:
     df = load_data(file_map[selected_file_name])
     
     if df is not None:
+        # 重置索引：如果換了檔案，為了安全起見，重置某些索引
+        if st.session_state.get('last_analyzed_file') != selected_file_name:
+             # 不強制重置所有，但更新檔案標記
+             pass 
+
         num_cols = df.select_dtypes(include=['number']).columns.tolist()
         cat_cols = df.select_dtypes(exclude=['number', 'datetime']).columns.tolist()
         all_cols = df.columns.tolist()
 
-        # --- Sidebar 設定區 (強制使用 session_state 同步) ---
+        # --- Sidebar 設定區 (Callbacks) ---
+        # 這些 callback 確保當使用者手動選的時候，idx 會更新
+        def update_chart_idx(): st.session_state.chart_type_idx = safe_index(st.session_state.w_chart_type, CHART_TYPES)
+        def update_x_idx(): st.session_state.x_col_idx = safe_index(st.session_state.w_x_col, all_cols)
+        def update_y_idx(): st.session_state.y_col_idx = safe_index(st.session_state.w_y_col, num_cols)
+        def update_y2_idx(): st.session_state.y_col_2_idx = safe_index(st.session_state.w_y2_col, num_cols)
+        def update_color_idx(): st.session_state.color_col_idx = safe_index(st.session_state.w_color_col, ["(無)"]+all_cols)
+        def update_agg_idx(): st.session_state.agg_func_idx = safe_index(st.session_state.w_agg, agg_funcs_list)
+
         with st.sidebar:
             st.markdown("---")
             st.header("2. 繪圖設定")
             
-            # Helper function to get index safely
-            def get_idx(val, lst): return lst.index(val) if val in lst else 0
-
-            # 1. Chart Type
+            # 1. Chart Type (Widget Key 加上 w_ 前綴，避免衝突)
             chart_type = st.selectbox(
                 "圖表類型", CHART_TYPES, 
-                index=get_idx(st.session_state.get('chart_type_box'), CHART_TYPES),
-                key='chart_type_box'
+                index=st.session_state.chart_type_idx, 
+                key='w_chart_type', on_change=update_chart_idx
             )
             
             # 2. X / Y Selection
             if chart_type == "雙軸組合圖 (Combo)":
-                x_col = st.selectbox("X 軸", all_cols, index=get_idx(st.session_state.get('x_col_box'), all_cols), key='x_col_box')
-                y_col = st.selectbox("左軸", num_cols, index=get_idx(st.session_state.get('y_col_box'), num_cols), key='y_col_box')
-                y_col_2 = st.selectbox("右軸", num_cols, index=get_idx(st.session_state.get('y_col_2_box'), num_cols), key='y_col_2_box')
+                x_col = st.selectbox("X 軸", all_cols, index=st.session_state.x_col_idx, key='w_x_col', on_change=update_x_idx)
+                y_col = st.selectbox("左軸", num_cols, index=st.session_state.y_col_idx, key='w_y_col', on_change=update_y_idx)
+                y_col_2 = st.selectbox("右軸", num_cols, index=st.session_state.y_col_2_idx, key='w_y2_col', on_change=update_y2_idx)
             elif chart_type == "樹狀圖 (TreeMap)":
-                treemap_path = st.multiselect("層級", cat_cols, default=st.session_state.get('treemap_box', []) or cat_cols[:1], key='treemap_box')
-                y_col = st.selectbox("數值", num_cols, index=get_idx(st.session_state.get('y_col_box'), num_cols), key='y_col_box')
+                treemap_path = st.multiselect("層級", cat_cols, default=st.session_state.treemap_path or cat_cols[:1], key='w_tree')
+                st.session_state.treemap_path = treemap_path # 直接同步
+                y_col = st.selectbox("數值", num_cols, index=st.session_state.y_col_idx, key='w_y_col', on_change=update_y_idx)
+                x_col = all_cols[0] if all_cols else None # Dummy
             else:
-                x_col = st.selectbox("X 軸", all_cols, index=get_idx(st.session_state.get('x_col_box'), all_cols), key='x_col_box')
-                y_col = st.selectbox("Y 軸", num_cols, index=get_idx(st.session_state.get('y_col_box'), num_cols), key='y_col_box')
+                x_col = st.selectbox("X 軸", all_cols, index=st.session_state.x_col_idx, key='w_x_col', on_change=update_x_idx)
+                y_col = st.selectbox("Y 軸", num_cols, index=st.session_state.y_col_idx, key='w_y_col', on_change=update_y_idx)
             
             # 3. Color & Agg
             if chart_type not in ["樹狀圖 (TreeMap)"]:
-                color_col = st.selectbox("分組", ["(無)"] + all_cols, index=get_idx(st.session_state.get('color_col_box'), ["(無)"]+all_cols), key='color_col_box')
+                color_col = st.selectbox("分組", ["(無)"] + all_cols, index=st.session_state.color_col_idx, key='w_color_col', on_change=update_color_idx)
             else: color_col = "(無)"
             
-            agg_func = st.selectbox("計算", agg_funcs_list, index=get_idx(st.session_state.get('agg_func_box'), agg_funcs_list), key='agg_func_box')
+            agg_func = st.selectbox("計算", agg_funcs_list, index=st.session_state.agg_func_idx, key='w_agg', on_change=update_agg_idx)
 
         # =========================================================
-        # 🚀 [Lyra V130] 頂部圖表區
+        # 🚀 [Lyra V140] 圖表渲染引擎 (Protected)
         # =========================================================
         
         if df is not None:
@@ -252,23 +270,33 @@ if uploaded_files:
                 real_agg = {"總和 (Sum)": "sum", "平均 (Avg)": "mean", "最大值 (Max)": "max", "計數 (Count)": "count"}[agg_func]
                 use_raw = chart_type in RAW_DATA_CHARTS
                 
+                # Data Preparation
                 if use_raw: 
                     df_agg = df.copy()
                 else:
                     cols = [c for c in [x_col, color_col] if c != "(無)"]
-                    if chart_type == "雙軸組合圖 (Combo)": df_agg = df.groupby(cols, as_index=False)[[y_col, y_col_2]].agg(real_agg)
-                    elif chart_type == "樹狀圖 (TreeMap)": df_agg = df.groupby(treemap_path, as_index=False)[y_col].agg(real_agg) if treemap_path else None
-                    else: df_agg = df.groupby(cols, as_index=False)[y_col].agg(real_agg)
+                    if not cols and chart_type != "樹狀圖 (TreeMap)":
+                        df_agg = None
+                    elif chart_type == "雙軸組合圖 (Combo)": 
+                        df_agg = df.groupby(cols, as_index=False)[[y_col, y_col_2]].agg(real_agg)
+                    elif chart_type == "樹狀圖 (TreeMap)": 
+                        df_agg = df.groupby(treemap_path, as_index=False)[y_col].agg(real_agg) if treemap_path else None
+                    else: 
+                        df_agg = df.groupby(cols, as_index=False)[y_col].agg(real_agg)
 
+                # Fix Numeric Date
                 if df_agg is not None and chart_type != "直方圖 (Histogram)" and x_col in df_agg.columns and pd.api.types.is_numeric_dtype(df_agg[x_col]):
                     if 190000 < df_agg[x_col].mean() < 210012: df_agg[x_col] = df_agg[x_col].astype(str)
 
+                # Sorting
                 if chart_type in ["折線圖 (Line)", "面積圖 (Area)"] and df_agg is not None:
                     df_agg = df_agg.sort_values(by=x_col)
-                
-                # V130: 修正排序邏輯，預設不強制排序，除非需要
-                # 这里可以加回排序逻辑，但要小心不要和时序锁定冲突
+                elif not use_raw and df_agg is not None and chart_type not in ["樹狀圖 (TreeMap)", "雷達圖 (Radar)"]:
+                     idx = st.session_state.sort_order_idx
+                     if idx == 1: df_agg = df_agg.sort_values(by=y_col, ascending=False)
+                     elif idx == 2: df_agg = df_agg.sort_values(by=y_col, ascending=True)
 
+                # Plotting
                 if df_agg is not None:
                     fig = None
                     p = {"data_frame": df_agg, "x": x_col if x_col in df_agg.columns else None, "title": f"{chart_type}"}
@@ -292,17 +320,22 @@ if uploaded_files:
                     if fig:
                         fig.update_layout(template="plotly_white", height=500, margin=dict(t=30, b=50, l=50, r=50), font=dict(family=font_choice.split(',')[0].strip("'"), size=16), hovermode="x unified")
                         st.plotly_chart(fig, use_container_width=True)
-            except Exception as e: st.error(f"繪圖錯誤: {e}")
+                else:
+                    st.info("請選擇正確的 X/Y 軸欄位以生成圖表")
+
+            except Exception as e: 
+                # [V140 Fix] 顯示更詳細的錯誤，避免只顯示 None
+                st.error(f"繪圖發生錯誤: {repr(e)}")
 
         # =========================================================
-        # 🚀 [Lyra V130] AI 按鈕區 (Fix Button Logic)
+        # 🚀 [Lyra V140] AI 按鈕區 (完全透過 Index 同步)
         # =========================================================
         st.markdown("---")
         st.subheader("🤖 AI 戰略分析面板")
-        st.caption("👇 捲動挑選")
+        st.caption("👇 捲動挑選 (已修復同步問題)")
 
         with st.container(height=300):
-            if st.session_state['gemini_api_key']:
+            if st.session_state.get('gemini_api_key'):
                 if 'last_analyzed_file' not in st.session_state or st.session_state['last_analyzed_file'] != selected_file_name:
                     with st.spinner("🧠 正在掃描全域數據特徵..."):
                         insights, error_msg = analyze_with_gemini(df, st.session_state['gemini_api_key'])
@@ -321,24 +354,23 @@ if uploaded_files:
                         for i, insight in enumerate(group_insights):
                             with cols[i % 5]:
                                 if st.button(f"📊 {insight['title']}", key=f"btn_{group_name}_{i}", use_container_width=True):
-                                    # [V130 Fix] 模糊匹配
                                     raw = insight.get('chart_type', '')
                                     matched = "長條圖 (Bar)"
                                     for t in CHART_TYPES:
                                         if any(k.strip("()") in raw for k in t.split(' ') if len(k)>2):
                                             matched = t; break
                                     
-                                    # [V130 Critical Fix] 直接更新 State Value (Key)，並強制 Rerun
-                                    st.session_state['chart_type_box'] = matched
-                                    st.session_state['x_col_box'] = insight.get('x_col')
-                                    st.session_state['y_col_box'] = insight.get('y_col')
-                                    st.session_state['color_col_box'] = insight.get('color_col') if insight.get('color_col') else "(無)"
+                                    # [V140 Fix] 這裡只更新 Index，不碰 Widget Key
+                                    st.session_state.chart_type_idx = safe_index(matched, CHART_TYPES)
+                                    st.session_state.x_col_idx = safe_index(insight.get('x_col'), all_cols)
+                                    st.session_state.y_col_idx = safe_index(insight.get('y_col'), num_cols)
+                                    st.session_state.color_col_idx = safe_index(insight.get('color_col'), ["(無)"]+all_cols)
+                                    
+                                    sort = insight.get('sort', 'none')
+                                    st.session_state.sort_order_idx = 1 if sort=='desc' else 2 if sort=='asc' else 0
                                     
                                     if matched == "樹狀圖 (TreeMap)" and insight.get('x_col'):
-                                        st.session_state['treemap_box'] = [insight.get('x_col')]
-                                    
-                                    # 排序邏輯 (這裡簡化處理，直接設定 session，雖然 Sidebar 沒綁定 sort 但不影響繪圖)
-                                    # 如果要綁定 Sidebar 排序，請在 Sidebar 加回 sort_box 並更新之
+                                        st.session_state.treemap_path = [insight.get('x_col')]
                                     
                                     st.rerun()
             else:
