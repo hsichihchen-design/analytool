@@ -36,7 +36,7 @@ for key, value in default_states.items():
 # ==========================================
 # 1. 全域設定與 CSS
 # ==========================================
-st.set_page_config(page_title="作圖小工具 V85 (Persona Lenses)", layout="wide", page_icon="✨")
+st.set_page_config(page_title="作圖小工具 V86 (Stable)", layout="wide", page_icon="✨")
 
 def inject_custom_css(font_family):
     google_font_import = ""
@@ -126,7 +126,6 @@ def analyze_with_gemini(df, api_key):
                 col_profile["min"] = float(df[col].min())
                 col_profile["max"] = float(df[col].max())
                 col_profile["mean"] = float(df[col].mean())
-                # 加入標準差，幫助 AI 判斷是否需要箱型圖 (波動大才需要)
                 try: col_profile["std"] = float(df[col].std()) 
                 except: pass
                 
@@ -152,7 +151,6 @@ def analyze_with_gemini(df, api_key):
         columns_summary_json = json.dumps(data_summary, ensure_ascii=False, indent=2)
 
         # [Step 2] V85 Persona-Based Prompt
-        # 這裡不只是要求 Insight，而是要求 AI 扮演四種不同的分析角色
         prompt = f"""
         <role>
         你是一位首席數據分析師。你擅長運用「多維度分析框架」來挖掘數據故事。
@@ -234,12 +232,18 @@ def analyze_with_gemini(df, api_key):
     except Exception as e:
         return None, f"AI 分析失敗: {str(e)}"
 
-# [Helper] 模糊搜尋
+# [Helper] 模糊搜尋 (V86 Fix: 處理數字欄位導致的 TypeError)
 def find_best_match(target, candidates):
     if not target: return None
+    # 1. 精確匹配 (允許非字串)
     if target in candidates: return target
+    
+    # 2. 轉字串後模糊搜尋
+    str_target = str(target)
     for c in candidates:
-        if target in c or c in target: return c
+        str_c = str(c)
+        if str_target in str_c or str_c in str_target: 
+            return c
     return None
 
 # ==========================================
@@ -301,7 +305,7 @@ def load_data(file):
 # ==========================================
 
 with st.sidebar:
-    st.markdown("### ✨ Lyra V85")
+    st.markdown("### ✨ Lyra V86")
     st.header("1. 資料來源")
     st.session_state['gemini_api_key'] = st.text_input("🔑 Gemini API Key", value=st.session_state['gemini_api_key'], type="password")
     
