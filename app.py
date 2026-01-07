@@ -403,18 +403,18 @@ if uploaded_files:
                 if chart_type == "雙軸組合圖 (Combo)":
                      grp_cols = [x_col]
                      df_agg = df.groupby(grp_cols, as_index=False)[[y_col, y_col_2]].agg(real_agg)
-            elif chart_type == "樹狀圖 (TreeMap)":
-                 if not treemap_path: 
-                     df_agg = None
-                 else:
-                     # 建立聚合字典，確保 Y 軸數值被計算
-                     agg_dict = {y_col: real_agg}
-                     
-                     # 關鍵修正：如果有選顏色欄位，且它是數值型態，也要加入聚合計算，否則繪圖時會找不到欄位
-                     if color_col != "(無)" and color_col != y_col and color_col in num_cols:
-                         agg_dict[color_col] = real_agg
+                elif chart_type == "樹狀圖 (TreeMap)":
+                     if not treemap_path: 
+                         df_agg = None
+                     else:
+                         # 建立聚合字典，確保 Y 軸數值被計算
+                         agg_dict = {y_col: real_agg}
                          
-                     df_agg = df.groupby(treemap_path, as_index=False).agg(agg_dict)
+                         # 關鍵修正：如果有選顏色欄位，且它是數值型態，也要加入聚合計算，否則繪圖時會找不到欄位
+                         if color_col != "(無)" and color_col != y_col and color_col in num_cols:
+                             agg_dict[color_col] = real_agg
+                             
+                         df_agg = df.groupby(treemap_path, as_index=False).agg(agg_dict)
                 elif chart_type == "雷達圖 (Radar)":
                      grp_cols = [x_col]
                      if color_col != "(無)": grp_cols.append(color_col)
@@ -547,3 +547,4 @@ if uploaded_files:
                                     
                                     st.session_state['menu_id'] += 1
                                     st.rerun()
+
