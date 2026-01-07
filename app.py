@@ -108,76 +108,122 @@ def analyze_with_gemini(df, api_key):
         model_name = get_valid_model()
         model = genai.GenerativeModel(model_name)
 
+        # ---------------------------------------------------------
+        # [Step 1] 資深分析師的資料嗅探 (Advanced Profiling)
+        # ---------------------------------------------------------
         stats_info = {}
+        
+        # 1. 數值欄位：計算相關性，找出「強相關」的線索
+        num_df = df.select_dtypes(include=['number'])
+        corr_hints = []
+        if len(num_df.columns) > 1:
+            try:
+                corr_matrix = num_df.corr().abs()
+                # 只取上三角矩陣避免重複
+                upper = corr_matrix.where(np.triu(np.ones(corr_matrix.shape), k=1).astype(bool))
+                # 找出相關係數 > 0.5 的組合
+                strong_pairs = upper.stack().reset_index()
+                strong_pairs.columns = ['col1', 'col2', 'corr']
+                strong_pairs = strong_pairs[strong_pairs['corr'] > 0.5].sort_values(by='corr', ascending=False).head(5)
+                for _, row in strong_pairs.iterrows():
+                    corr_hints.append(f"{row['col1']} & {row['col2']} (Corr: {row['corr']:.2f})")
+            except: pass
+
+        # 2. 欄位深度掃描
         for col in df.columns:
             n_unique = df[col].nunique()
             dtype = str(df[col].dtype)
+            
             col_profile = {
                 "dtype": dtype,
-                "n_unique": n_unique
+                "n_unique": n_unique,
+                "missing_pct": round(df[col].isnull().mean() * 100, 1) # 缺失值比例
             }
+            
+            # 數值型詳細特徵
             if pd.api.types.is_numeric_dtype(df[col]) and n_unique > 0:
                 col_profile["min"] = float(df[col].min())
-                col_max = float(df[col].max())
-                col_profile["max"] = col_max
-                if (col_max > 190000 and col_max < 210012):
-                    col_profile["semantic"] = "TIME_SERIES"
+                col_profile["max"] = float(df[col].max())
+                col_profile["mean"] = float(df[col].mean())
+                # 簡單判斷是否為時間序列 (YYYYMM 等格式)
+                if (col_profile["max"] > 190000 and col_profile["max"] < 210012):
+                    col_profile["semantic_hint"] = "可能為年月格式 (YYYYMM)"
+                elif (1900 < col_profile["mean"] < 2100):
+                    col_profile["semantic_hint"] = "可能為年份 (Year)"
             
+            # 類別型：找出 Top 5 分佈 (這對決定圖表類型至關重要)
+            else:
+                try:
+                    top_counts = df[col].value_counts().head(5).to_dict()
+                    col_profile["top_frequent_values"] = top_counts
+                except: pass
+
+            # 取樣
             try: col_profile["samples"] = df[col].dropna().astype(str).sample(min(3, len(df))).tolist()
             except: col_profile["samples"] = []
             
             stats_info[col] = col_profile
 
-        columns_summary = json.dumps(stats_info, ensure_ascii=False, indent=2)
+        # 彙整給 AI 的摘要
+        data_summary = {
+            "columns_profile": stats_info,
+            "correlation_hints (High Priority)": corr_hints, # 告訴 AI 哪些變數有關聯
+            "total_rows": len(df)
+        }
         
-        # --- [Lyra Architect Prompt V80 - Smart Adaptive] ---
+        columns_summary_json = json.dumps(data_summary, ensure_ascii=False, indent=2)
+
+        # ---------------------------------------------------------
+        # [Step 2] Lyra Architect Prompt V90 - Senior Analyst Edition
+        # ---------------------------------------------------------
         prompt = f"""
         <role>
-        你是一位全能的數據視覺化專家。請分析以下數據結構，並挖掘多維度 Insight。
+        你是一位擁有 10 年經驗的資深數據分析總監。你不僅僅是畫圖，你是要透過數據說故事 (Data Storytelling)。
+        請分析以下數據集摘要，推斷這份資料的「業務場景 (Business Context)」，並提出具備商業洞察力的視覺化建議。
         </role>
 
         <data_profile>
-        {columns_summary}
+        {columns_summary_json}
         </data_profile>
 
         <chart_catalog>
-        標準名稱 (嚴格遵守):
-        1. "長條圖 (Bar)": 比較分類。
-        2. "折線圖 (Line)": 時間趨勢。
-        3. "面積圖 (Area)": 累積趨勢。
-        4. "圓餅圖 (Pie)": 佔比 (分類<10)。
-        5. "雙軸組合圖 (Combo)": 雙數值對比 (如: 銷售 & 毛利)。
-        6. "散佈圖 (Scatter)": 變數相關性。
-        7. "箱型圖 (Box Plot)": 分佈與離群值。
-        8. "直方圖 (Histogram)": 數值頻率。
-        9. "漏斗圖 (Funnel)": 流程轉化 (如: 階段)。
-        10. "樹狀圖 (TreeMap)": 層級結構 (如: 地區/產品分類)。
-        11. "雷達圖 (Radar)": 多維能力評分。
+        標準圖表庫:
+        1. "長條圖 (Bar)": 適合比較 Top N、排名、類別差異。
+        2. "折線圖 (Line)": 適合時間趨勢、季節性分析。
+        3. "面積圖 (Area)": 適合累積量、趨勢堆疊。
+        4. "圓餅圖 (Pie)": 適合佔比 (僅當類別數 < 8 時使用)。
+        5. "雙軸組合圖 (Combo)": **強烈推薦** 用於呈現相關性 (例如: 銷售額 vs 毛利率)。
+        6. "散佈圖 (Scatter)": 用於驗證兩個數值變數的關聯分佈。
+        7. "箱型圖 (Box Plot)": 用於分析中位數、四分位距、離群值 (Outliers)。
+        8. "直方圖 (Histogram)": 用於看數值分佈形狀 (常態分佈/偏態)。
+        9. "漏斗圖 (Funnel)": **僅當** 資料有明確流程/階段 (Stage) 時使用。
+        10. "樹狀圖 (TreeMap)": 適合呈現層級佔比 (Hierarchy) 或大量類別的佔比。
+        11. "雷達圖 (Radar)": 適合多維度能力/屬性評分比較。
         </chart_catalog>
 
-        <strategy>
-        請生成 **20 個** 建議。遵循以下「適應性原則」：
-        1. **優先偵測特殊圖表**：
-           - 若發現「階段、流程、Stage」欄位 -> **務必**生成 "漏斗圖"。
-           - 若發現「評分、Score、能力」多欄位 -> **務必**生成 "雷達圖"。
-           - 若發現「層級關係 (大類/子類, 區域/城市)」 -> **務必**生成 "樹狀圖"。
-        2. **穩健基礎**：
-           - 若無上述特徵，請專注於 "長條圖"、"折線圖"、"雙軸組合圖" 與 "散佈圖" 的深入分析。
-           - 不要為了多樣性而強行使用不適合的圖表 (例如：不要對純時間序列使用漏斗圖)。
-        3. **必備檢查**：
-           - 任何數值分佈分析，請至少提供 1 個 "箱型圖"。
-        </strategy>
+        <analysis_strategy>
+        請生成 **20 個** 高價值的分析視角，必須包含以下四個維度：
+        1. **趨勢分析 (Trend)**: 時間維度的變化 (Line, Area)。
+        2. **分佈與組成 (Distribution & Composition)**: 各類別的佔比與分佈狀況 (Bar, Pie, TreeMap, Histogram)。
+        3. **關聯性挖掘 (Correlation)**: 利用 `correlation_hints` 找出變數間的關係 (Scatter, Combo)。例如：高單價產品是否利潤較低？
+        4. **異常與特徵偵測 (Anomaly & Characteristic)**: 透過箱型圖或雷達圖找出特徵 (Box Plot, Radar)。
+
+        <rules>
+        1. **智慧偵測**: 若欄位名稱包含 "Rate", "Ratio", "Percent", "%" 且為數值，這通常是關鍵指標 (KPI)，請多加利用。
+        2. **避免雜訊**: 如果某個類別欄位的 unique 值超過 50 個 (如 User ID)，請不要直接拿來做 X 軸 (除非是用計數)，或者建議做 Top 10 分析。
+        3. **標題優化**: 標題不要只是「X vs Y」，要帶有洞察意圖，例如「各區業績表現」而非「區域 vs 金額」。
+        </rules>
 
         <output_format>
-        回傳純 JSON Array (無 Markdown):
+        Strict JSON Array only:
         [
           {{
-            "group": "群組名稱",
-            "title": "標題 (Max 10字)",
+            "group": "分析維度 (例如: 銷售趨勢分析, 產品表現評估)",
+            "title": "具洞察力的標題 (Max 15字)",
             "chart_type": "Chart Catalog 中的標準名稱",
             "x_col": "欄位名",
-            "y_col": "欄位名 (數值)",
-            "color_col": "欄位名 (可null)",
+            "y_col": "數值欄位名",
+            "color_col": "分組欄位 (若無則 null)",
             "sort": "desc/asc/none"
           }}
         ]
@@ -186,6 +232,7 @@ def analyze_with_gemini(df, api_key):
 
         response = model.generate_content(prompt)
         json_str = response.text.strip()
+        # 清理 Markdown 標記
         if json_str.startswith("```json"): json_str = json_str[7:]
         if json_str.startswith("```"): json_str = json_str[3:]
         if json_str.endswith("```"): json_str = json_str[:-3]
@@ -561,3 +608,4 @@ if uploaded_files:
                                     
                                     st.session_state['menu_id'] += 1
                                     st.rerun()
+
