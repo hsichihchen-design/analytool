@@ -36,7 +36,7 @@ for key, value in default_states.items():
 # ==========================================
 # 1. 全域設定與 CSS
 # ==========================================
-st.set_page_config(page_title="作圖小工具 V84 (Insight Maximize)", layout="wide", page_icon="✨")
+st.set_page_config(page_title="作圖小工具 V85 (Persona Lenses)", layout="wide", page_icon="✨")
 
 def inject_custom_css(font_family):
     google_font_import = ""
@@ -74,7 +74,7 @@ def inject_custom_css(font_family):
     """, unsafe_allow_html=True)
 
 # ==========================================
-# 2. 核心功能：Gemini AI 分析引擎 (V84 多樣性增強版)
+# 2. 核心功能：Gemini AI 分析引擎 (V85 Persona Lenses)
 # ==========================================
 
 def get_valid_model():
@@ -97,9 +97,11 @@ def analyze_with_gemini(df, api_key):
         model_name = get_valid_model()
         model = genai.GenerativeModel(model_name)
 
-        # [Step 1] 資料剖析
+        # [Step 1] 資料剖析 (Data Profiling)
         stats_info = {}
         num_df = df.select_dtypes(include=['number'])
+        
+        # 1. 相關性計算
         corr_hints = []
         if len(num_df.columns) > 1:
             try:
@@ -107,11 +109,12 @@ def analyze_with_gemini(df, api_key):
                 upper = corr_matrix.where(np.triu(np.ones(corr_matrix.shape), k=1).astype(bool))
                 strong_pairs = upper.stack().reset_index()
                 strong_pairs.columns = ['col1', 'col2', 'corr']
-                strong_pairs = strong_pairs[strong_pairs['corr'] > 0.5].sort_values(by='corr', ascending=False).head(5)
+                strong_pairs = strong_pairs[strong_pairs['corr'] > 0.4].sort_values(by='corr', ascending=False).head(5)
                 for _, row in strong_pairs.iterrows():
                     corr_hints.append(f"{row['col1']} & {row['col2']} (Corr: {row['corr']:.2f})")
             except: pass
 
+        # 2. 欄位特徵掃描
         for col in df.columns:
             n_unique = df[col].nunique()
             dtype = str(df[col].dtype)
@@ -123,6 +126,10 @@ def analyze_with_gemini(df, api_key):
                 col_profile["min"] = float(df[col].min())
                 col_profile["max"] = float(df[col].max())
                 col_profile["mean"] = float(df[col].mean())
+                # 加入標準差，幫助 AI 判斷是否需要箱型圖 (波動大才需要)
+                try: col_profile["std"] = float(df[col].std()) 
+                except: pass
+                
                 if (col_profile["max"] > 190000 and col_profile["max"] < 210012):
                     col_profile["semantic_hint"] = "可能為年月格式 (YYYYMM)"
             else:
@@ -138,17 +145,19 @@ def analyze_with_gemini(df, api_key):
 
         data_summary = {
             "columns_profile": stats_info,
-            "correlation_hints (High Priority)": corr_hints,
+            "correlation_hints": corr_hints,
             "total_rows": len(df)
         }
         
         columns_summary_json = json.dumps(data_summary, ensure_ascii=False, indent=2)
 
-        # [Step 2] V84 Advanced Prompt
+        # [Step 2] V85 Persona-Based Prompt
+        # 這裡不只是要求 Insight，而是要求 AI 扮演四種不同的分析角色
         prompt = f"""
         <role>
-        你是一位極具洞察力的資深數據科學家。你的目標是挖掘數據中「不易被發現」的規律，並透過多樣化的圖表呈現。
-        **請避免懶惰地只生成長條圖和折線圖，請積極思考是否有更適合的高階圖表。**
+        你是一位首席數據分析師。你擅長運用「多維度分析框架」來挖掘數據故事。
+        請不要只提供描述性統計 (發生了什麼)，請嘗試提供診斷性與策略性見解 (為什麼發生/該怎麼做)。
+        你的目標是透過圖表多樣性來激發使用者的靈感。
         </role>
 
         <data_profile>
@@ -156,39 +165,53 @@ def analyze_with_gemini(df, api_key):
         </data_profile>
 
         <chart_catalog>
-        1. "長條圖 (Bar)": 基礎比較。
-        2. "折線圖 (Line)": 趨勢分析。
-        3. "面積圖 (Area)": 累積趨勢。
+        1. "長條圖 (Bar)": 基礎比較/排名。
+        2. "折線圖 (Line)": 時間趨勢。
+        3. "面積圖 (Area)": 累積量/堆疊趨勢。
         4. "圓餅圖 (Pie)": 簡單佔比。
-        5. "雙軸組合圖 (Combo)": **強烈推薦** (關聯性/對比)。
-        6. "散佈圖 (Scatter)": **強烈推薦** (分佈/關聯)。
-        7. "箱型圖 (Box Plot)": **強烈推薦** (離群值/穩定性)。
-        8. "直方圖 (Histogram)": 頻率分佈。
-        9. "漏斗圖 (Funnel)": 階段轉化。
-        10. "樹狀圖 (TreeMap)": **強烈推薦** (複雜層級/大量類別佔比)。
-        11. "雷達圖 (Radar)": **強烈推薦** (多維指標評估)。
+        5. "雙軸組合圖 (Combo)": **變數關聯與對比** (如: 營收 vs 毛利)。
+        6. "散佈圖 (Scatter)": **變數相關性與分佈** (如: 價格 vs 銷量)。
+        7. "箱型圖 (Box Plot)": **離群值與波動範圍** (如: 品質穩定度)。
+        8. "直方圖 (Histogram)": 數值頻率分佈。
+        9. "漏斗圖 (Funnel)": 階段轉化率。
+        10. "樹狀圖 (TreeMap)": **宏觀結構與層級佔比**。
+        11. "雷達圖 (Radar)": **多維度綜合評分**。
         </chart_catalog>
 
-        <scenario_triggers>
-        **當你發現以下特徵時，請優先使用對應圖表：**
-        * **多個評分/比率欄位 (Score/Rate/%)** -> 務必生成 1~2 個 **"雷達圖 (Radar)"** 來比較綜合表現。
-        * **大量分類 (Category > 5) 且有層級關係** -> 務必生成 **"樹狀圖 (TreeMap)"** (比圓餅圖更好)。
-        * **數值分佈/檢測異常值** -> 務必生成 **"箱型圖 (Box Plot)"** (例如：利潤分佈、運送天數分佈)。
-        * **兩個數值變數** -> 優先考慮 **"散佈圖 (Scatter)"** 或 **"雙軸組合圖 (Combo)"**。
-        </scenario_triggers>
+        <instruction>
+        請生成 **20 個** 具備深度的分析建議。你必須嚴格遵守以下 **「四種分析鏡頭 (4 Analytical Lenses)」** 來確保多樣性：
 
-        <diversity_rules>
-        1. 生成 20 個建議。
-        2. **約束：** "長條圖" 與 "折線圖" 的總數 **不得超過 10 個** (<= 50%)。
-        3. **必須包含：** 至少 1 個箱型圖、1 個樹狀圖、1 個雙軸圖 (如果資料允許)。
-        </diversity_rules>
+        **鏡頭 1：🦅 宏觀戰略 (The Strategist) - 關注組成與結構**
+        * **任務**：分析整體的構成、市佔率、層級關係。
+        * **思考**：什麼佔了最大宗？結構如何？
+        * **優先圖表**：**樹狀圖 (TreeMap)** (強烈推薦用於呈現層級)、圓餅圖、面積圖。
+        * **範例**：各區域下的產品營收佔比 (TreeMap)。
+
+        **鏡頭 2：⚖️ 權衡與關聯 (The Scientist) - 關注變數關係**
+        * **任務**：尋找兩個變數之間的 Trade-off 或相關性。
+        * **思考**：A升高時，B是升高還是降低？有沒有反直覺的關係？
+        * **優先圖表**：**散佈圖 (Scatter)**、**雙軸組合圖 (Combo)**。
+        * **範例**：折扣率越高，利潤真的越低嗎？(Scatter/Combo)。
+
+        **鏡頭 3：📉 風險與分佈 (The Risk Manager) - 關注異常與波動**
+        * **任務**：不要只看平均值，要看變異數和極端值。
+        * **思考**：資料分佈是集中的還是分散的？有無離群值 (Outliers)？
+        * **優先圖表**：**箱型圖 (Box Plot)** (強烈推薦)、直方圖。
+        * **範例**：各產品的評分分佈差異，誰的品質最不穩定？(Box Plot)。
+
+        **鏡頭 4：🕸️ 綜合評估 (The Evaluator) - 關注多維特徵**
+        * **任務**：對項目進行多指標的綜合打分。
+        * **思考**：如果有多個評分欄位 (Score/Rate)，如何一眼看出優劣勢？
+        * **優先圖表**：**雷達圖 (Radar)**。
+        * **範例**：產品 A 在效能、外觀、價格的綜合評比 (Radar)。
+        </instruction>
 
         <output_format>
         Strict JSON Array only:
         [
           {{
-            "group": "分析視角 (例如: 異常偵測, 綜合評估)",
-            "title": "標題 (Max 15字)",
+            "group": "請填寫上述對應的鏡頭名稱 (例如: 🦅 宏觀戰略分析)",
+            "title": "具洞察力的標題 (Max 15字)",
             "chart_type": "Chart Catalog 中的標準名稱",
             "x_col": "欄位名",
             "y_col": "數值欄位名",
@@ -278,7 +301,7 @@ def load_data(file):
 # ==========================================
 
 with st.sidebar:
-    st.markdown("### ✨ Lyra V84")
+    st.markdown("### ✨ Lyra V85")
     st.header("1. 資料來源")
     st.session_state['gemini_api_key'] = st.text_input("🔑 Gemini API Key", value=st.session_state['gemini_api_key'], type="password")
     
