@@ -353,6 +353,10 @@ if uploaded_files:
             if chart_type in CHART_TYPES:
                 st.session_state['chart_type_idx'] = CHART_TYPES.index(chart_type)
 
+            # --- [Critical Fix] 初始化變數，避免特定圖表 (如 TreeMap) 略過定義導致 NameError ---
+            x_col = None
+            y_col_2 = None
+
             # UI 條件渲染
             if chart_type == "雙軸組合圖 (Combo)":
                 x_col = st.selectbox("X 軸", all_cols, index=update_idx('x_col', all_cols), key=f'x_col_{uid}')
@@ -381,9 +385,9 @@ if uploaded_files:
                 color_col = st.selectbox("分組", ["(無)"] + all_cols, index=update_idx('color_col', ["(無)"]+all_cols), key=f'color_col_{uid}')
             
             # 手動同步邏輯
-            if 'x_col' in locals() and x_col in all_cols: st.session_state['x_col_idx'] = all_cols.index(x_col)
+            if 'x_col' in locals() and x_col and x_col in all_cols: st.session_state['x_col_idx'] = all_cols.index(x_col)
             if 'y_col' in locals() and y_col in num_cols: st.session_state['y_col_idx'] = num_cols.index(y_col)
-            if 'y_col_2' in locals() and y_col_2 in num_cols: st.session_state['y_col_2_idx'] = num_cols.index(y_col_2)
+            if 'y_col_2' in locals() and y_col_2 and y_col_2 in num_cols: st.session_state['y_col_2_idx'] = num_cols.index(y_col_2)
             if 'color_col' in locals() and color_col in (["(無)"] + all_cols): st.session_state['color_col_idx'] = (["(無)"] + all_cols).index(color_col)
             if 'agg_func' in locals() and agg_func in agg_funcs_list: st.session_state['agg_func_idx'] = agg_funcs_list.index(agg_func)
             if 'treemap_path' in locals(): st.session_state['treemap_path'] = treemap_path
@@ -431,7 +435,8 @@ if uploaded_files:
                     df_agg = df.groupby(grp_cols, as_index=False)[y_col].agg(real_agg)
 
             # --- 後處理：將數值型的年份/代碼轉為字串 ---
-            if df_agg is not None and x_col in df_agg.columns and pd.api.types.is_numeric_dtype(df_agg[x_col]):
+            # 修正：增加對 x_col 是否存在的檢查，防止 TreeMap 報錯
+            if df_agg is not None and x_col and x_col in df_agg.columns and pd.api.types.is_numeric_dtype(df_agg[x_col]):
                 col_mean = df_agg[x_col].mean()
                 if (1900 < col_mean < 2100) or (190000 < col_mean < 210012):
                     df_agg[x_col] = df_agg[x_col].astype(str)
@@ -446,7 +451,7 @@ if uploaded_files:
             
             # --- 繪製圖表 ---
             if df_agg is not None:
-                common_params = {"data_frame": df_agg, "x": x_col if x_col in df_agg.columns else None, "title": f"{chart_type}: {x_col if x_col else ''}"}
+                common_params = {"data_frame": df_agg, "x": x_col if (x_col and x_col in df_agg.columns) else None, "title": f"{chart_type}: {x_col if x_col else ''}"}
                 if color_col != "(無)" and color_col in df_agg.columns: common_params["color"] = color_col
 
                 if chart_type == "長條圖 (Bar)":
