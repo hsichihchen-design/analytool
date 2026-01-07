@@ -36,7 +36,7 @@ for key, value in default_states.items():
 # ==========================================
 # 1. 全域設定與 CSS (空間優化版)
 # ==========================================
-st.set_page_config(page_title="作圖小工具 V82 (Lyra Stability)", layout="wide", page_icon="✨")
+st.set_page_config(page_title="作圖小工具 V83 (Lyra Stability)", layout="wide", page_icon="✨")
 
 def inject_custom_css(font_family):
     google_font_import = ""
@@ -81,7 +81,7 @@ def inject_custom_css(font_family):
     """, unsafe_allow_html=True)
 
 # ==========================================
-# 2. 核心功能：Gemini AI 分析引擎 (強固版)
+# 2. 核心功能：Gemini AI 分析引擎 (強固版 V83)
 # ==========================================
 
 def get_valid_model():
@@ -137,7 +137,9 @@ def analyze_with_gemini(df, api_key):
                     col_profile["semantic_hint"] = "可能為年月格式 (YYYYMM)"
             else:
                 try:
-                    top_counts = df[col].value_counts().head(5).to_dict()
+                    # [Critical Fix V83] 強制轉換 Key 為字串，解決 Timestamp 無法序列化導致的 AI 分析失敗
+                    vc = df[col].value_counts().head(5)
+                    top_counts = {str(k): int(v) for k, v in vc.items()} 
                     col_profile["top_frequent_values"] = top_counts
                 except: pass
 
@@ -208,7 +210,7 @@ def analyze_with_gemini(df, api_key):
         """
 
         response = model.generate_content(prompt)
-        # [Critical Fix] 使用 Regex 提取 JSON，忽略開頭結尾的廢話
+        # 使用 Regex 提取 JSON，忽略開頭結尾的廢話
         match = re.search(r'\[.*\]', response.text, re.DOTALL)
         if match:
             json_str = match.group(0)
@@ -287,7 +289,7 @@ def load_data(file):
 # ==========================================
 
 with st.sidebar:
-    st.markdown("### ✨ Lyra V82")
+    st.markdown("### ✨ Lyra V83")
     st.header("1. 資料來源")
     st.session_state['gemini_api_key'] = st.text_input("🔑 Gemini API Key", value=st.session_state['gemini_api_key'], type="password")
     
@@ -352,7 +354,7 @@ if uploaded_files:
             if chart_type in CHART_TYPES:
                 st.session_state['chart_type_idx'] = CHART_TYPES.index(chart_type)
 
-            # [Critical Fix] 初始化所有繪圖變數
+            # [Critical Fix] 初始化所有繪圖變數，防止 x_col is not defined 錯誤
             x_col, y_col, y_col_2, color_col = None, None, None, "(無)"
             agg_func = "總和 (Sum)"
             treemap_path = []
@@ -500,7 +502,7 @@ if uploaded_files:
                         st.session_state['ai_insights'] = insights
                         st.session_state['last_analyzed_file'] = selected_file_name
                     else:
-                        st.error(error_msg) # [Fix] 顯示錯誤訊息
+                        st.error(error_msg)
 
             if st.session_state.get('ai_insights'):
                 insights = st.session_state['ai_insights']
