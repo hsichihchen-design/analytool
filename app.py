@@ -6,6 +6,7 @@ from plotly.subplots import make_subplots
 import io
 import numpy as np
 import random
+import re
 from datetime import datetime, timedelta
 import google.generativeai as genai
 import json
@@ -35,7 +36,7 @@ for key, value in default_states.items():
 # ==========================================
 # 1. 全域設定與 CSS (空間優化版)
 # ==========================================
-st.set_page_config(page_title="作圖小工具 V81 (Lyra Senior Architect)", layout="wide", page_icon="✨")
+st.set_page_config(page_title="作圖小工具 V82 (Lyra Stability)", layout="wide", page_icon="✨")
 
 def inject_custom_css(font_family):
     google_font_import = ""
@@ -80,7 +81,7 @@ def inject_custom_css(font_family):
     """, unsafe_allow_html=True)
 
 # ==========================================
-# 2. 核心功能：Gemini AI 分析引擎 (資深分析師版)
+# 2. 核心功能：Gemini AI 分析引擎 (強固版)
 # ==========================================
 
 def get_valid_model():
@@ -103,7 +104,7 @@ def analyze_with_gemini(df, api_key):
         model_name = get_valid_model()
         model = genai.GenerativeModel(model_name)
 
-        # [Step 1] 資深分析師的資料嗅探 (Advanced Profiling)
+        # [Step 1] 資料剖析
         stats_info = {}
         
         # 相關性掃描
@@ -123,13 +124,11 @@ def analyze_with_gemini(df, api_key):
         for col in df.columns:
             n_unique = df[col].nunique()
             dtype = str(df[col].dtype)
-            
             col_profile = {
                 "dtype": dtype,
                 "n_unique": n_unique,
                 "missing_pct": round(df[col].isnull().mean() * 100, 1)
             }
-            
             if pd.api.types.is_numeric_dtype(df[col]) and n_unique > 0:
                 col_profile["min"] = float(df[col].min())
                 col_profile["max"] = float(df[col].max())
@@ -144,7 +143,6 @@ def analyze_with_gemini(df, api_key):
 
             try: col_profile["samples"] = df[col].dropna().astype(str).sample(min(3, len(df))).tolist()
             except: col_profile["samples"] = []
-            
             stats_info[col] = col_profile
 
         data_summary = {
@@ -155,7 +153,7 @@ def analyze_with_gemini(df, api_key):
         
         columns_summary_json = json.dumps(data_summary, ensure_ascii=False, indent=2)
 
-        # [Step 2] Lyra Architect Prompt V90 - Senior Analyst Edition
+        # [Step 2] Prompt
         prompt = f"""
         <role>
         你是一位擁有 10 年經驗的資深數據分析總監。請分析以下數據集摘要，推斷這份資料的「業務場景」，並提出具備商業洞察力的視覺化建議。
@@ -197,7 +195,7 @@ def analyze_with_gemini(df, api_key):
         Strict JSON Array only:
         [
           {{
-            "group": "分析維度 (如: 銷售趨勢)",
+            "group": "分析維度",
             "title": "標題 (Max 15字)",
             "chart_type": "Chart Catalog 中的標準名稱",
             "x_col": "欄位名",
@@ -210,16 +208,25 @@ def analyze_with_gemini(df, api_key):
         """
 
         response = model.generate_content(prompt)
-        json_str = response.text.strip()
-        if json_str.startswith("```json"): json_str = json_str[7:]
-        if json_str.startswith("```"): json_str = json_str[3:]
-        if json_str.endswith("```"): json_str = json_str[:-3]
-            
-        insights = json.loads(json_str)
-        return insights, None
+        # [Critical Fix] 使用 Regex 提取 JSON，忽略開頭結尾的廢話
+        match = re.search(r'\[.*\]', response.text, re.DOTALL)
+        if match:
+            json_str = match.group(0)
+            insights = json.loads(json_str)
+            return insights, None
+        else:
+            return None, "AI 回傳格式無法解析 (No JSON found)"
 
     except Exception as e:
         return None, f"AI 分析失敗: {str(e)}"
+
+# [Helper] 模糊搜尋
+def find_best_match(target, candidates):
+    if not target: return None
+    if target in candidates: return target
+    for c in candidates:
+        if target in c or c in target: return c
+    return None
 
 # ==========================================
 # 3. 輔助與資料載入
@@ -280,7 +287,7 @@ def load_data(file):
 # ==========================================
 
 with st.sidebar:
-    st.markdown("### ✨ Lyra V81")
+    st.markdown("### ✨ Lyra V82")
     st.header("1. 資料來源")
     st.session_state['gemini_api_key'] = st.text_input("🔑 Gemini API Key", value=st.session_state['gemini_api_key'], type="password")
     
@@ -294,7 +301,6 @@ with st.sidebar:
 
     st.markdown("---")
     with st.expander("📥 超級測試資料"):
-        st.caption("包含層級、漏斗、多維評分。")
         if st.button("🎲 生成測試資料"):
             st.download_button("📊 下載 Excel", generate_demo_excel(), "Lyra_Full_Test_Data.xlsx")
 
@@ -346,7 +352,7 @@ if uploaded_files:
             if chart_type in CHART_TYPES:
                 st.session_state['chart_type_idx'] = CHART_TYPES.index(chart_type)
 
-            # [Critical Fix] 初始化所有繪圖變數，避免 NameError
+            # [Critical Fix] 初始化所有繪圖變數
             x_col, y_col, y_col_2, color_col = None, None, None, "(無)"
             agg_func = "總和 (Sum)"
             treemap_path = []
@@ -357,7 +363,6 @@ if uploaded_files:
                 y_col = st.selectbox("左軸數值", num_cols, index=update_idx('y_col', num_cols), key=f'y_col_{uid}')
                 y_col_2 = st.selectbox("右軸數值", num_cols, index=update_idx('y_col_2', num_cols), key=f'y_col_2_{uid}')
                 agg_func = st.selectbox("計算", agg_funcs_list, index=update_idx('agg_func', agg_funcs_list), key=f'agg_func_{uid}')
-                # 雙軸圖不開放 color 分組，避免混淆
                 color_col = "(無)" 
             elif chart_type == "樹狀圖 (TreeMap)":
                 raw_default = st.session_state['treemap_path'] if st.session_state['treemap_path'] else (cat_cols[:2] if len(cat_cols)>=2 else cat_cols[:1])                
@@ -484,7 +489,7 @@ if uploaded_files:
             st.info("👈 請從左側選擇圖表類型，或等待下方 AI 產生建議。")
 
         # ==========================================
-        # 6. AI 分析與控制面板 (Fix: Fuzzy Matching)
+        # 6. AI 分析與控制面板
         # ==========================================
         
         if st.session_state['gemini_api_key']:
@@ -494,16 +499,8 @@ if uploaded_files:
                     if not error_msg:
                         st.session_state['ai_insights'] = insights
                         st.session_state['last_analyzed_file'] = selected_file_name
-            
-            # [Helper] 模糊搜尋：從 candidates 中找到最像 target 的欄位
-            def find_best_match(target, candidates):
-                if not target: return None
-                if target in candidates: return target
-                # 簡單模糊：包含關鍵字
-                for c in candidates:
-                    if target in c or c in target:
-                        return c
-                return None
+                    else:
+                        st.error(error_msg) # [Fix] 顯示錯誤訊息
 
             if st.session_state.get('ai_insights'):
                 insights = st.session_state['ai_insights']
@@ -519,7 +516,6 @@ if uploaded_files:
                         for i, insight in enumerate(group_insights):
                             with cols[i % 5]:
                                 if st.button(insight['title'], key=f"btn_{group_name}_{i}"):
-                                    # 模糊匹配圖表名稱
                                     raw_type = insight.get('chart_type', '')
                                     matched_type = "長條圖 (Bar)"
                                     for standard_type in CHART_TYPES:
@@ -532,7 +528,6 @@ if uploaded_files:
                                     except: st.session_state['chart_type_idx'] = 0
 
                                     def sync(key, ai_val, candidates):
-                                        # 使用模糊匹配找到最佳對應欄位
                                         best_val = find_best_match(ai_val, candidates)
                                         if best_val: 
                                             st.session_state[f"{key}_idx"] = candidates.index(best_val)
@@ -541,7 +536,6 @@ if uploaded_files:
                                     
                                     sync('x_col', insight.get('x_col'), all_cols)
                                     sync('y_col', insight.get('y_col'), num_cols)
-                                    # 雙軸圖右軸若 AI 沒給，預設跟左軸一樣 (避免報錯) 或嘗試找提示
                                     sync('y_col_2', insight.get('y_col'), num_cols) 
                                     sync('color_col', insight.get('color_col'), ["(無)"]+all_cols)
                                     
@@ -554,7 +548,6 @@ if uploaded_files:
                                         target_x = find_best_match(insight.get('x_col'), cat_cols)
                                         if target_x:
                                             st.session_state['treemap_path'] = [target_x]
-                                            # 自動嘗試補第二層
                                             if '城市' in all_cols and target_x == '大區域':
                                                 st.session_state['treemap_path'] = ['大區域', '城市']
                                     
