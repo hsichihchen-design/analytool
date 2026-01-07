@@ -36,7 +36,7 @@ for key, value in default_states.items():
 # ==========================================
 # 1. 全域設定與 CSS
 # ==========================================
-st.set_page_config(page_title="作圖小工具 V86 (Stable)", layout="wide", page_icon="✨")
+st.set_page_config(page_title="作圖小工具 V87 (Waterfall & Heatmap)", layout="wide", page_icon="✨")
 
 def inject_custom_css(font_family):
     google_font_import = ""
@@ -74,7 +74,7 @@ def inject_custom_css(font_family):
     """, unsafe_allow_html=True)
 
 # ==========================================
-# 2. 核心功能：Gemini AI 分析引擎 (V85 Persona Lenses)
+# 2. 核心功能：Gemini AI 分析引擎 (V87 Enhanced)
 # ==========================================
 
 def get_valid_model():
@@ -97,11 +97,9 @@ def analyze_with_gemini(df, api_key):
         model_name = get_valid_model()
         model = genai.GenerativeModel(model_name)
 
-        # [Step 1] 資料剖析 (Data Profiling)
         stats_info = {}
         num_df = df.select_dtypes(include=['number'])
         
-        # 1. 相關性計算
         corr_hints = []
         if len(num_df.columns) > 1:
             try:
@@ -114,7 +112,6 @@ def analyze_with_gemini(df, api_key):
                     corr_hints.append(f"{row['col1']} & {row['col2']} (Corr: {row['corr']:.2f})")
             except: pass
 
-        # 2. 欄位特徵掃描
         for col in df.columns:
             n_unique = df[col].nunique()
             dtype = str(df[col].dtype)
@@ -150,12 +147,10 @@ def analyze_with_gemini(df, api_key):
         
         columns_summary_json = json.dumps(data_summary, ensure_ascii=False, indent=2)
 
-        # [Step 2] V85 Persona-Based Prompt
         prompt = f"""
         <role>
         你是一位首席數據分析師。你擅長運用「多維度分析框架」來挖掘數據故事。
-        請不要只提供描述性統計 (發生了什麼)，請嘗試提供診斷性與策略性見解 (為什麼發生/該怎麼做)。
-        你的目標是透過圖表多樣性來激發使用者的靈感。
+        請嘗試提供診斷性與策略性見解。目標是透過圖表多樣性來激發使用者的靈感。
         </role>
 
         <data_profile>
@@ -167,53 +162,47 @@ def analyze_with_gemini(df, api_key):
         2. "折線圖 (Line)": 時間趨勢。
         3. "面積圖 (Area)": 累積量/堆疊趨勢。
         4. "圓餅圖 (Pie)": 簡單佔比。
-        5. "雙軸組合圖 (Combo)": **變數關聯與對比** (如: 營收 vs 毛利)。
-        6. "散佈圖 (Scatter)": **變數相關性與分佈** (如: 價格 vs 銷量)。
-        7. "箱型圖 (Box Plot)": **離群值與波動範圍** (如: 品質穩定度)。
+        5. "雙軸組合圖 (Combo)": 變數關聯與對比。
+        6. "散佈圖 (Scatter)": 變數相關性與分佈。
+        7. "箱型圖 (Box Plot)": 離群值與波動範圍。
         8. "直方圖 (Histogram)": 數值頻率分佈。
         9. "漏斗圖 (Funnel)": 階段轉化率。
-        10. "樹狀圖 (TreeMap)": **宏觀結構與層級佔比**。
-        11. "雷達圖 (Radar)": **多維度綜合評分**。
+        10. "樹狀圖 (TreeMap)": 宏觀結構與層級佔比。
+        11. "雷達圖 (Radar)": 多維度綜合評分。
+        12. "熱力圖 (Heatmap)": **矩陣式強度分佈** (如: 時間vs類別, 產品vs地區)。
+        13. "瀑布圖 (Waterfall)": **數值增減構成** (如: P&L分析, 費用結構)。
         </chart_catalog>
 
         <instruction>
-        請生成 **20 個** 具備深度的分析建議。你必須嚴格遵守以下 **「四種分析鏡頭 (4 Analytical Lenses)」** 來確保多樣性：
+        請生成 **20 個** 具備深度的分析建議，並嚴格遵守以下 **「四種分析鏡頭」**：
 
-        **鏡頭 1：🦅 宏觀戰略 (The Strategist) - 關注組成與結構**
-        * **任務**：分析整體的構成、市佔率、層級關係。
-        * **思考**：什麼佔了最大宗？結構如何？
-        * **優先圖表**：**樹狀圖 (TreeMap)** (強烈推薦用於呈現層級)、圓餅圖、面積圖。
-        * **範例**：各區域下的產品營收佔比 (TreeMap)。
-
-        **鏡頭 2：⚖️ 權衡與關聯 (The Scientist) - 關注變數關係**
-        * **任務**：尋找兩個變數之間的 Trade-off 或相關性。
-        * **思考**：A升高時，B是升高還是降低？有沒有反直覺的關係？
-        * **優先圖表**：**散佈圖 (Scatter)**、**雙軸組合圖 (Combo)**。
-        * **範例**：折扣率越高，利潤真的越低嗎？(Scatter/Combo)。
-
-        **鏡頭 3：📉 風險與分佈 (The Risk Manager) - 關注異常與波動**
-        * **任務**：不要只看平均值，要看變異數和極端值。
-        * **思考**：資料分佈是集中的還是分散的？有無離群值 (Outliers)？
-        * **優先圖表**：**箱型圖 (Box Plot)** (強烈推薦)、直方圖。
-        * **範例**：各產品的評分分佈差異，誰的品質最不穩定？(Box Plot)。
-
-        **鏡頭 4：🕸️ 綜合評估 (The Evaluator) - 關注多維特徵**
-        * **任務**：對項目進行多指標的綜合打分。
-        * **思考**：如果有多個評分欄位 (Score/Rate)，如何一眼看出優劣勢？
-        * **優先圖表**：**雷達圖 (Radar)**。
-        * **範例**：產品 A 在效能、外觀、價格的綜合評比 (Radar)。
+        **鏡頭 1：🦅 宏觀戰略 (The Strategist)**
+        * 關注：組成、結構、財務累積。
+        * 推薦：**樹狀圖 (TreeMap)**、**瀑布圖 (Waterfall)** (若有財務/成本增減數據)、圓餅圖。
+        
+        **鏡頭 2：⚖️ 權衡與關聯 (The Scientist)**
+        * 關注：變數關係、矩陣模式。
+        * 推薦：**散佈圖 (Scatter)**、**雙軸圖 (Combo)**、**熱力圖 (Heatmap)** (若有兩個分類維度+數值)。
+        
+        **鏡頭 3：📉 風險與分佈 (The Risk Manager)**
+        * 關注：異常、波動、分佈。
+        * 推薦：**箱型圖 (Box Plot)**、直方圖。
+        
+        **鏡頭 4：🕸️ 綜合評估 (The Evaluator)**
+        * 關注：多維特徵。
+        * 推薦：**雷達圖 (Radar)**。
         </instruction>
 
         <output_format>
         Strict JSON Array only:
         [
           {{
-            "group": "請填寫上述對應的鏡頭名稱 (例如: 🦅 宏觀戰略分析)",
-            "title": "具洞察力的標題 (Max 15字)",
+            "group": "鏡頭名稱 (如: 🦅 宏觀戰略)",
+            "title": "標題 (Max 15字)",
             "chart_type": "Chart Catalog 中的標準名稱",
-            "x_col": "欄位名",
+            "x_col": "欄位名 (Waterfall/Heatmap 為主要分類)",
             "y_col": "數值欄位名",
-            "color_col": "分組欄位 (若無則 null)",
+            "color_col": "分組欄位 (Heatmap 時為 Y軸分類, 其他可 null)",
             "sort": "desc/asc/none"
           }}
         ]
@@ -232,13 +221,9 @@ def analyze_with_gemini(df, api_key):
     except Exception as e:
         return None, f"AI 分析失敗: {str(e)}"
 
-# [Helper] 模糊搜尋 (V86 Fix: 處理數字欄位導致的 TypeError)
 def find_best_match(target, candidates):
     if not target: return None
-    # 1. 精確匹配 (允許非字串)
     if target in candidates: return target
-    
-    # 2. 轉字串後模糊搜尋
     str_target = str(target)
     for c in candidates:
         str_c = str(c)
@@ -305,7 +290,7 @@ def load_data(file):
 # ==========================================
 
 with st.sidebar:
-    st.markdown("### ✨ Lyra V86")
+    st.markdown("### ✨ Lyra V87")
     st.header("1. 資料來源")
     st.session_state['gemini_api_key'] = st.text_input("🔑 Gemini API Key", value=st.session_state['gemini_api_key'], type="password")
     
@@ -332,7 +317,8 @@ all_cols, num_cols, cat_cols = [], [], []
 CHART_TYPES = [
     "長條圖 (Bar)", "折線圖 (Line)", "雙軸組合圖 (Combo)", "圓餅圖 (Pie)", 
     "樹狀圖 (TreeMap)", "散佈圖 (Scatter)", "箱型圖 (Box Plot)", 
-    "直方圖 (Histogram)", "雷達圖 (Radar)", "面積圖 (Area)", "漏斗圖 (Funnel)"
+    "直方圖 (Histogram)", "雷達圖 (Radar)", "面積圖 (Area)", "漏斗圖 (Funnel)",
+    "熱力圖 (Heatmap)", "瀑布圖 (Waterfall)"
 ]
 RAW_DATA_CHARTS = ["箱型圖 (Box Plot)", "直方圖 (Histogram)", "散佈圖 (Scatter)"]
 
@@ -342,7 +328,6 @@ if uploaded_files:
     df = load_data(file_map[selected_file_name])
     
     if df is not None:
-        # 時間粒度增強
         date_cols = [c for c in df.columns if pd.api.types.is_datetime64_any_dtype(df[c])]
         for col in date_cols:
             df[f"{col}(YM)"] = df[col].dt.strftime('%Y-%m')
@@ -364,13 +349,11 @@ if uploaded_files:
                 if val >= len(options_list): val = 0
                 return val
 
-            # 1. 圖表類型
             chart_type_idx = update_idx('chart_type', CHART_TYPES)
             chart_type = st.selectbox("圖表類型", CHART_TYPES, index=chart_type_idx, key=f"chart_type_{uid}")
             if chart_type in CHART_TYPES:
                 st.session_state['chart_type_idx'] = CHART_TYPES.index(chart_type)
 
-            # 初始化繪圖變數
             x_col, y_col, y_col_2, color_col = None, None, None, "(無)"
             agg_func = "總和 (Sum)"
             treemap_path = []
@@ -394,6 +377,16 @@ if uploaded_files:
                 y_col = st.selectbox("數值 (Value)", num_cols, index=update_idx('y_col', num_cols), key=f'y_col_{uid}')
                 color_col = st.selectbox("分組", ["(無)"] + all_cols, index=update_idx('color_col', ["(無)"]+all_cols), key=f'color_col_{uid}')
                 agg_func = st.selectbox("計算", agg_funcs_list, index=update_idx('agg_func', agg_funcs_list), key=f'agg_func_{uid}')
+            elif chart_type == "熱力圖 (Heatmap)":
+                x_col = st.selectbox("X 軸 (分類/時間)", all_cols, index=update_idx('x_col', all_cols), key=f'x_col_{uid}')
+                color_col = st.selectbox("Y 軸 (分類/時間)", all_cols, index=update_idx('color_col', all_cols), key=f'color_col_{uid}')
+                y_col = st.selectbox("熱力數值 (Value)", num_cols, index=update_idx('y_col', num_cols), key=f'y_col_{uid}')
+                agg_func = st.selectbox("計算", agg_funcs_list, index=update_idx('agg_func', agg_funcs_list), key=f'agg_func_{uid}')
+            elif chart_type == "瀑布圖 (Waterfall)":
+                x_col = st.selectbox("X 軸 (類別/項目)", all_cols, index=update_idx('x_col', all_cols), key=f'x_col_{uid}')
+                y_col = st.selectbox("數值 (增減)", num_cols, index=update_idx('y_col', num_cols), key=f'y_col_{uid}')
+                agg_func = st.selectbox("計算", agg_funcs_list, index=update_idx('agg_func', agg_funcs_list), key=f'agg_func_{uid}')
+                color_col = "(無)"
             else:
                 x_col = st.selectbox("X 軸", all_cols, index=update_idx('x_col', all_cols), key=f'x_col_{uid}')
                 y_col = st.selectbox("Y 軸 (數值)", num_cols, index=update_idx('y_col', num_cols), key=f'y_col_{uid}')
@@ -426,6 +419,7 @@ if uploaded_files:
                      grp_cols = [x_col]
                      measure_cols = list(set([y_col, y_col_2])) 
                      df_agg = df.groupby(grp_cols, as_index=False)[measure_cols].agg(real_agg)
+                
                 elif chart_type == "樹狀圖 (TreeMap)":
                      if not treemap_path: df_agg = None
                      else:
@@ -433,13 +427,25 @@ if uploaded_files:
                          if color_col != "(無)" and color_col != y_col and color_col in num_cols:
                              agg_dict[color_col] = real_agg
                          df_agg = df.groupby(treemap_path, as_index=False).agg(agg_dict)
+                
                 elif chart_type == "雷達圖 (Radar)":
                      grp_cols = [x_col]
-                     if color_col != "(無)": grp_cols.append(color_col)
+                     if color_col != "(無)" and color_col != x_col: grp_cols.append(color_col)
                      df_agg = df.groupby(grp_cols, as_index=False)[y_col].agg(real_agg)
+                
+                elif chart_type == "熱力圖 (Heatmap)":
+                     grp_cols = [x_col, color_col] # color_col 在這裡是 Y 軸
+                     df_agg = df.groupby(grp_cols, as_index=False)[y_col].agg(real_agg)
+
+                elif chart_type == "瀑布圖 (Waterfall)":
+                     grp_cols = [x_col]
+                     df_agg = df.groupby(grp_cols, as_index=False)[y_col].agg(real_agg)
+
                 else:
+                    # 標準圖表: 加入防呆，如果分組欄位跟 X 軸一樣，就不要重複加入
                     grp_cols = [x_col]
-                    if color_col != "(無)": grp_cols.append(color_col)
+                    if color_col != "(無)" and color_col != x_col: 
+                        grp_cols.append(color_col)
                     df_agg = df.groupby(grp_cols, as_index=False)[y_col].agg(real_agg)
 
             # 後處理：數值轉字串
@@ -447,11 +453,17 @@ if uploaded_files:
                 col_mean = df_agg[x_col].mean()
                 if (1900 < col_mean < 2100) or (190000 < col_mean < 210012):
                     df_agg[x_col] = df_agg[x_col].astype(str)
+            
+            # 對 Heatmap 的 Y 軸也做檢查
+            if chart_type == "熱力圖 (Heatmap)" and df_agg is not None and color_col in df_agg.columns and pd.api.types.is_numeric_dtype(df_agg[color_col]):
+                 col_mean = df_agg[color_col].mean()
+                 if (1900 < col_mean < 2100) or (190000 < col_mean < 210012):
+                    df_agg[color_col] = df_agg[color_col].astype(str)
 
             # 強制排序
-            if chart_type in ["折線圖 (Line)", "面積圖 (Area)", "雙軸組合圖 (Combo)"] and df_agg is not None and x_col:
+            if chart_type in ["折線圖 (Line)", "面積圖 (Area)", "雙軸組合圖 (Combo)", "瀑布圖 (Waterfall)"] and df_agg is not None and x_col:
                 df_agg = df_agg.sort_values(by=x_col, ascending=True)
-            elif not use_raw_data and df_agg is not None and chart_type not in ["樹狀圖 (TreeMap)", "雷達圖 (Radar)"]:
+            elif not use_raw_data and df_agg is not None and chart_type not in ["樹狀圖 (TreeMap)", "雷達圖 (Radar)", "熱力圖 (Heatmap)"]:
                 sort_idx = st.session_state['sort_order_idx']
                 if sort_idx == 1: df_agg = df_agg.sort_values(by=y_col, ascending=False)
                 elif sort_idx == 2: df_agg = df_agg.sort_values(by=y_col, ascending=True)
@@ -459,7 +471,9 @@ if uploaded_files:
             # 繪圖
             if df_agg is not None:
                 common_params = {"data_frame": df_agg, "x": x_col if (x_col and x_col in df_agg.columns) else None, "title": f"{chart_type}: {x_col if x_col else ''}"}
-                if color_col != "(無)" and color_col in df_agg.columns: common_params["color"] = color_col
+                # 注意：Heatmap 的 color 不是分組，是數值；Waterfall 不需要 color 分組
+                if chart_type not in ["熱力圖 (Heatmap)", "瀑布圖 (Waterfall)"]:
+                    if color_col != "(無)" and color_col in df_agg.columns: common_params["color"] = color_col
 
                 if chart_type == "長條圖 (Bar)":
                     current_chart_fig = px.bar(**common_params, y=y_col, text_auto='.2s')
@@ -487,6 +501,22 @@ if uploaded_files:
                     current_chart_fig = px.box(df_agg, x=x_col, y=y_col, color=color_col if color_col!="(無)" else None, title=f"{y_col} 分佈 (by {x_col})")
                 elif chart_type == "散佈圖 (Scatter)":
                     current_chart_fig = px.scatter(df_agg, x=x_col, y=y_col, color=color_col if color_col!="(無)" else None, title=f"{x_col} vs {y_col}")
+                elif chart_type == "熱力圖 (Heatmap)":
+                    # 使用 density_heatmap 或是 go.Heatmap。因為我們已經聚合過了，用 go.Heatmap 最穩。
+                    current_chart_fig = go.Figure(data=go.Heatmap(
+                        x=df_agg[x_col],
+                        y=df_agg[color_col], # 這裡是 Y 軸
+                        z=df_agg[y_col],
+                        colorscale='Viridis'
+                    ))
+                    current_chart_fig.update_layout(title=f"熱力圖: {x_col} vs {color_col}")
+                elif chart_type == "瀑布圖 (Waterfall)":
+                    current_chart_fig = go.Figure(go.Waterfall(
+                        x=df_agg[x_col],
+                        y=df_agg[y_col],
+                        connector={"line":{"color":"rgb(63, 63, 63)"}},
+                    ))
+                    current_chart_fig.update_layout(title=f"瀑布圖: {y_col} (by {x_col})")
 
         except Exception as e:
             st.error(f"繪圖錯誤: {e}")
@@ -512,7 +542,7 @@ if uploaded_files:
         
         if st.session_state['gemini_api_key']:
             if 'last_analyzed_file' not in st.session_state or st.session_state['last_analyzed_file'] != selected_file_name:
-                with st.spinner("🧠 正在構建分析矩陣 (全面掃描 11 種圖表可能性)..."):
+                with st.spinner("🧠 正在構建分析矩陣 (全面掃描 13 種圖表可能性)..."):
                     insights, error_msg = analyze_with_gemini(df, st.session_state['gemini_api_key'])
                     if not error_msg:
                         st.session_state['ai_insights'] = insights
