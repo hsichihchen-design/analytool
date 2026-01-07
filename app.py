@@ -547,4 +547,3 @@ if uploaded_files:
                                     
                                     st.session_state['menu_id'] += 1
                                     st.rerun()
-
