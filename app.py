@@ -34,9 +34,9 @@ for key, value in default_states.items():
         st.session_state[key] = value
 
 # ==========================================
-# 1. 全域設定與 CSS (空間優化版)
+# 1. 全域設定與 CSS
 # ==========================================
-st.set_page_config(page_title="作圖小工具 V83 (Lyra Stability)", layout="wide", page_icon="✨")
+st.set_page_config(page_title="作圖小工具 V84 (Insight Maximize)", layout="wide", page_icon="✨")
 
 def inject_custom_css(font_family):
     google_font_import = ""
@@ -51,13 +51,8 @@ def inject_custom_css(font_family):
     <style>
         {google_font_import}
         html, body, [class*="css"] {{ font-family: {font_css_rule} !important; }}
-        
-        .block-container {{
-            padding-top: 1rem !important;
-            padding-bottom: 2rem !important;
-        }}
+        .block-container {{ padding-top: 1rem !important; padding-bottom: 2rem !important; }}
         header {{ visibility: hidden; }}
-        
         div.stButton > button {{
             width: 100%; min-height: 40px; height: 100%; white-space: normal; word-wrap: break-word;
             padding: 2px 6px; line-height: 1.1; border-radius: 4px; border: 1px solid #ddd;
@@ -65,12 +60,10 @@ def inject_custom_css(font_family):
             font-size: 0.8rem; box-shadow: 0 1px 1px rgba(0,0,0,0.05);
             font-family: {font_css_rule} !important;
         }}
-        
         div.stButton > button:hover {{
             border-color: #7c4dff; color: #7c4dff; background-color: #f8f5ff;
             transform: translateY(-1px); z-index: 1;
         }}
-        
         .group-header {{
             font-weight: 700; font-size: 0.85rem; color: #666;
             margin-top: 10px; margin-bottom: 5px; padding-bottom: 2px;
@@ -81,7 +74,7 @@ def inject_custom_css(font_family):
     """, unsafe_allow_html=True)
 
 # ==========================================
-# 2. 核心功能：Gemini AI 分析引擎 (強固版 V83)
+# 2. 核心功能：Gemini AI 分析引擎 (V84 多樣性增強版)
 # ==========================================
 
 def get_valid_model():
@@ -106,8 +99,6 @@ def analyze_with_gemini(df, api_key):
 
         # [Step 1] 資料剖析
         stats_info = {}
-        
-        # 相關性掃描
         num_df = df.select_dtypes(include=['number'])
         corr_hints = []
         if len(num_df.columns) > 1:
@@ -125,8 +116,7 @@ def analyze_with_gemini(df, api_key):
             n_unique = df[col].nunique()
             dtype = str(df[col].dtype)
             col_profile = {
-                "dtype": dtype,
-                "n_unique": n_unique,
+                "dtype": dtype, "n_unique": n_unique,
                 "missing_pct": round(df[col].isnull().mean() * 100, 1)
             }
             if pd.api.types.is_numeric_dtype(df[col]) and n_unique > 0:
@@ -137,7 +127,6 @@ def analyze_with_gemini(df, api_key):
                     col_profile["semantic_hint"] = "可能為年月格式 (YYYYMM)"
             else:
                 try:
-                    # [Critical Fix V83] 強制轉換 Key 為字串，解決 Timestamp 無法序列化導致的 AI 分析失敗
                     vc = df[col].value_counts().head(5)
                     top_counts = {str(k): int(v) for k, v in vc.items()} 
                     col_profile["top_frequent_values"] = top_counts
@@ -155,10 +144,11 @@ def analyze_with_gemini(df, api_key):
         
         columns_summary_json = json.dumps(data_summary, ensure_ascii=False, indent=2)
 
-        # [Step 2] Prompt
+        # [Step 2] V84 Advanced Prompt
         prompt = f"""
         <role>
-        你是一位擁有 10 年經驗的資深數據分析總監。請分析以下數據集摘要，推斷這份資料的「業務場景」，並提出具備商業洞察力的視覺化建議。
+        你是一位極具洞察力的資深數據科學家。你的目標是挖掘數據中「不易被發現」的規律，並透過多樣化的圖表呈現。
+        **請避免懶惰地只生成長條圖和折線圖，請積極思考是否有更適合的高階圖表。**
         </role>
 
         <data_profile>
@@ -166,38 +156,38 @@ def analyze_with_gemini(df, api_key):
         </data_profile>
 
         <chart_catalog>
-        標準圖表庫:
-        1. "長條圖 (Bar)": 比較排名、差異。
-        2. "折線圖 (Line)": 時間趨勢。
+        1. "長條圖 (Bar)": 基礎比較。
+        2. "折線圖 (Line)": 趨勢分析。
         3. "面積圖 (Area)": 累積趨勢。
-        4. "圓餅圖 (Pie)": 佔比 (分類<8)。
-        5. "雙軸組合圖 (Combo)": **強烈推薦** 用於呈現相關性 (如: 銷售額 vs 毛利率)。
-        6. "散佈圖 (Scatter)": 變數關聯分佈。
-        7. "箱型圖 (Box Plot)": 中位數與離群值。
-        8. "直方圖 (Histogram)": 數值分佈形狀。
-        9. "漏斗圖 (Funnel)": 流程轉化。
-        10. "樹狀圖 (TreeMap)": 層級佔比。
-        11. "雷達圖 (Radar)": 多維能力評分。
+        4. "圓餅圖 (Pie)": 簡單佔比。
+        5. "雙軸組合圖 (Combo)": **強烈推薦** (關聯性/對比)。
+        6. "散佈圖 (Scatter)": **強烈推薦** (分佈/關聯)。
+        7. "箱型圖 (Box Plot)": **強烈推薦** (離群值/穩定性)。
+        8. "直方圖 (Histogram)": 頻率分佈。
+        9. "漏斗圖 (Funnel)": 階段轉化。
+        10. "樹狀圖 (TreeMap)": **強烈推薦** (複雜層級/大量類別佔比)。
+        11. "雷達圖 (Radar)": **強烈推薦** (多維指標評估)。
         </chart_catalog>
 
-        <analysis_strategy>
-        請生成 **20 個** 高價值的分析視角，必須包含：
-        1. **趨勢分析**: 時間維度變化。
-        2. **分佈與組成**: 各類別佔比。
-        3. **關聯性挖掘**: 利用 correlation_hints 找出關係。
-        4. **異常偵測**: 透過箱型圖等找出特徵。
+        <scenario_triggers>
+        **當你發現以下特徵時，請優先使用對應圖表：**
+        * **多個評分/比率欄位 (Score/Rate/%)** -> 務必生成 1~2 個 **"雷達圖 (Radar)"** 來比較綜合表現。
+        * **大量分類 (Category > 5) 且有層級關係** -> 務必生成 **"樹狀圖 (TreeMap)"** (比圓餅圖更好)。
+        * **數值分佈/檢測異常值** -> 務必生成 **"箱型圖 (Box Plot)"** (例如：利潤分佈、運送天數分佈)。
+        * **兩個數值變數** -> 優先考慮 **"散佈圖 (Scatter)"** 或 **"雙軸組合圖 (Combo)"**。
+        </scenario_triggers>
 
-        <rules>
-        1. 若欄位有 "(YM)" 後綴或為時間相關，優先用於趨勢圖的 X 軸。
-        2. 標題要帶有洞察意圖，例如「各區業績表現」而非「區域 vs 金額」。
-        3. 輸出欄位名稱時，請盡量使用 data_profile 中提供的精確欄位名稱。
-        </rules>
+        <diversity_rules>
+        1. 生成 20 個建議。
+        2. **約束：** "長條圖" 與 "折線圖" 的總數 **不得超過 10 個** (<= 50%)。
+        3. **必須包含：** 至少 1 個箱型圖、1 個樹狀圖、1 個雙軸圖 (如果資料允許)。
+        </diversity_rules>
 
         <output_format>
         Strict JSON Array only:
         [
           {{
-            "group": "分析維度",
+            "group": "分析視角 (例如: 異常偵測, 綜合評估)",
             "title": "標題 (Max 15字)",
             "chart_type": "Chart Catalog 中的標準名稱",
             "x_col": "欄位名",
@@ -210,7 +200,6 @@ def analyze_with_gemini(df, api_key):
         """
 
         response = model.generate_content(prompt)
-        # 使用 Regex 提取 JSON，忽略開頭結尾的廢話
         match = re.search(r'\[.*\]', response.text, re.DOTALL)
         if match:
             json_str = match.group(0)
@@ -289,7 +278,7 @@ def load_data(file):
 # ==========================================
 
 with st.sidebar:
-    st.markdown("### ✨ Lyra V83")
+    st.markdown("### ✨ Lyra V84")
     st.header("1. 資料來源")
     st.session_state['gemini_api_key'] = st.text_input("🔑 Gemini API Key", value=st.session_state['gemini_api_key'], type="password")
     
@@ -354,7 +343,7 @@ if uploaded_files:
             if chart_type in CHART_TYPES:
                 st.session_state['chart_type_idx'] = CHART_TYPES.index(chart_type)
 
-            # [Critical Fix] 初始化所有繪圖變數，防止 x_col is not defined 錯誤
+            # 初始化繪圖變數
             x_col, y_col, y_col_2, color_col = None, None, None, "(無)"
             agg_func = "總和 (Sum)"
             treemap_path = []
@@ -432,7 +421,7 @@ if uploaded_files:
                 if (1900 < col_mean < 2100) or (190000 < col_mean < 210012):
                     df_agg[x_col] = df_agg[x_col].astype(str)
 
-            # [Fix] 強制排序避免雙軸圖亂跑
+            # 強制排序
             if chart_type in ["折線圖 (Line)", "面積圖 (Area)", "雙軸組合圖 (Combo)"] and df_agg is not None and x_col:
                 df_agg = df_agg.sort_values(by=x_col, ascending=True)
             elif not use_raw_data and df_agg is not None and chart_type not in ["樹狀圖 (TreeMap)", "雷達圖 (Radar)"]:
