@@ -36,7 +36,7 @@ for key, value in default_states.items():
 # ==========================================
 # 1. 全域設定與 CSS
 # ==========================================
-st.set_page_config(page_title="作圖小工具 V87 (Waterfall & Heatmap)", layout="wide", page_icon="✨")
+st.set_page_config(page_title="作圖小工具 V88 (Deep Insight 30)", layout="wide", page_icon="✨")
 
 def inject_custom_css(font_family):
     google_font_import = ""
@@ -74,7 +74,7 @@ def inject_custom_css(font_family):
     """, unsafe_allow_html=True)
 
 # ==========================================
-# 2. 核心功能：Gemini AI 分析引擎 (V87 Enhanced)
+# 2. 核心功能：Gemini AI 分析引擎 (V88 Expanded)
 # ==========================================
 
 def get_valid_model():
@@ -150,7 +150,7 @@ def analyze_with_gemini(df, api_key):
         prompt = f"""
         <role>
         你是一位首席數據分析師。你擅長運用「多維度分析框架」來挖掘數據故事。
-        請嘗試提供診斷性與策略性見解。目標是透過圖表多樣性來激發使用者的靈感。
+        目標：透過圖表多樣性激發靈感，同時確保基礎分析的完整性。
         </role>
 
         <data_profile>
@@ -158,39 +158,44 @@ def analyze_with_gemini(df, api_key):
         </data_profile>
 
         <chart_catalog>
-        1. "長條圖 (Bar)": 基礎比較/排名。
-        2. "折線圖 (Line)": 時間趨勢。
-        3. "面積圖 (Area)": 累積量/堆疊趨勢。
-        4. "圓餅圖 (Pie)": 簡單佔比。
-        5. "雙軸組合圖 (Combo)": 變數關聯與對比。
-        6. "散佈圖 (Scatter)": 變數相關性與分佈。
-        7. "箱型圖 (Box Plot)": 離群值與波動範圍。
-        8. "直方圖 (Histogram)": 數值頻率分佈。
-        9. "漏斗圖 (Funnel)": 階段轉化率。
-        10. "樹狀圖 (TreeMap)": 宏觀結構與層級佔比。
-        11. "雷達圖 (Radar)": 多維度綜合評分。
-        12. "熱力圖 (Heatmap)": **矩陣式強度分佈** (如: 時間vs類別, 產品vs地區)。
-        13. "瀑布圖 (Waterfall)": **數值增減構成** (如: P&L分析, 費用結構)。
+        1. "長條圖 (Bar)": 比較排名 (基礎)。
+        2. "折線圖 (Line)": 時間趨勢 (基礎)。
+        3. "面積圖 (Area)": 累積趨勢。
+        4. "圓餅圖 (Pie)": 佔比。
+        5. "雙軸組合圖 (Combo)": 對比關聯。
+        6. "散佈圖 (Scatter)": 變數相關性。
+        7. "箱型圖 (Box Plot)": 異常與波動。
+        8. "直方圖 (Histogram)": 頻率分佈。
+        9. "漏斗圖 (Funnel)": 階段轉化。
+        10. "樹狀圖 (TreeMap)": 層級結構。
+        11. "雷達圖 (Radar)": 多維評分。
+        12. "熱力圖 (Heatmap)": 矩陣強度。
+        13. "瀑布圖 (Waterfall)": 數值增減。
         </chart_catalog>
 
         <instruction>
-        請生成 **20 個** 具備深度的分析建議，並嚴格遵守以下 **「四種分析鏡頭」**：
+        請生成 **30 個** 具備深度的分析建議。
+        
+        **【重要原則：平衡基礎與深度】**
+        雖然我們要追求深度圖表 (TreeMap, Waterfall, Heatmap...)，但 **長條圖 (Bar)** 與 **折線圖 (Line)** 仍是分析的基石。請確保在 30 個建議中，至少有 **8-10 個** 是基礎的 Bar 或 Line，用於呈現關鍵的排名與趨勢。
+
+        請依照以下 **「四種分析鏡頭」** 進行發想：
 
         **鏡頭 1：🦅 宏觀戰略 (The Strategist)**
         * 關注：組成、結構、財務累積。
-        * 推薦：**樹狀圖 (TreeMap)**、**瀑布圖 (Waterfall)** (若有財務/成本增減數據)、圓餅圖。
+        * 推薦：**樹狀圖 (TreeMap)**、**瀑布圖 (Waterfall)**、圓餅圖、面積圖。
         
         **鏡頭 2：⚖️ 權衡與關聯 (The Scientist)**
         * 關注：變數關係、矩陣模式。
-        * 推薦：**散佈圖 (Scatter)**、**雙軸圖 (Combo)**、**熱力圖 (Heatmap)** (若有兩個分類維度+數值)。
+        * 推薦：**散佈圖 (Scatter)**、**雙軸圖 (Combo)**、**熱力圖 (Heatmap)**。
         
         **鏡頭 3：📉 風險與分佈 (The Risk Manager)**
         * 關注：異常、波動、分佈。
         * 推薦：**箱型圖 (Box Plot)**、直方圖。
         
         **鏡頭 4：🕸️ 綜合評估 (The Evaluator)**
-        * 關注：多維特徵。
-        * 推薦：**雷達圖 (Radar)**。
+        * 關注：多維特徵、詳細排名。
+        * 推薦：**雷達圖 (Radar)**、**長條圖 (Bar)** (用於詳細排名)、**折線圖 (Line)** (用於詳細趨勢)。
         </instruction>
 
         <output_format>
@@ -200,7 +205,7 @@ def analyze_with_gemini(df, api_key):
             "group": "鏡頭名稱 (如: 🦅 宏觀戰略)",
             "title": "標題 (Max 15字)",
             "chart_type": "Chart Catalog 中的標準名稱",
-            "x_col": "欄位名 (Waterfall/Heatmap 為主要分類)",
+            "x_col": "欄位名",
             "y_col": "數值欄位名",
             "color_col": "分組欄位 (Heatmap 時為 Y軸分類, 其他可 null)",
             "sort": "desc/asc/none"
@@ -290,7 +295,7 @@ def load_data(file):
 # ==========================================
 
 with st.sidebar:
-    st.markdown("### ✨ Lyra V87")
+    st.markdown("### ✨ Lyra V88")
     st.header("1. 資料來源")
     st.session_state['gemini_api_key'] = st.text_input("🔑 Gemini API Key", value=st.session_state['gemini_api_key'], type="password")
     
@@ -434,7 +439,7 @@ if uploaded_files:
                      df_agg = df.groupby(grp_cols, as_index=False)[y_col].agg(real_agg)
                 
                 elif chart_type == "熱力圖 (Heatmap)":
-                     grp_cols = [x_col, color_col] # color_col 在這裡是 Y 軸
+                     grp_cols = [x_col, color_col] 
                      df_agg = df.groupby(grp_cols, as_index=False)[y_col].agg(real_agg)
 
                 elif chart_type == "瀑布圖 (Waterfall)":
@@ -454,7 +459,6 @@ if uploaded_files:
                 if (1900 < col_mean < 2100) or (190000 < col_mean < 210012):
                     df_agg[x_col] = df_agg[x_col].astype(str)
             
-            # 對 Heatmap 的 Y 軸也做檢查
             if chart_type == "熱力圖 (Heatmap)" and df_agg is not None and color_col in df_agg.columns and pd.api.types.is_numeric_dtype(df_agg[color_col]):
                  col_mean = df_agg[color_col].mean()
                  if (1900 < col_mean < 2100) or (190000 < col_mean < 210012):
@@ -471,7 +475,6 @@ if uploaded_files:
             # 繪圖
             if df_agg is not None:
                 common_params = {"data_frame": df_agg, "x": x_col if (x_col and x_col in df_agg.columns) else None, "title": f"{chart_type}: {x_col if x_col else ''}"}
-                # 注意：Heatmap 的 color 不是分組，是數值；Waterfall 不需要 color 分組
                 if chart_type not in ["熱力圖 (Heatmap)", "瀑布圖 (Waterfall)"]:
                     if color_col != "(無)" and color_col in df_agg.columns: common_params["color"] = color_col
 
@@ -502,10 +505,9 @@ if uploaded_files:
                 elif chart_type == "散佈圖 (Scatter)":
                     current_chart_fig = px.scatter(df_agg, x=x_col, y=y_col, color=color_col if color_col!="(無)" else None, title=f"{x_col} vs {y_col}")
                 elif chart_type == "熱力圖 (Heatmap)":
-                    # 使用 density_heatmap 或是 go.Heatmap。因為我們已經聚合過了，用 go.Heatmap 最穩。
                     current_chart_fig = go.Figure(data=go.Heatmap(
                         x=df_agg[x_col],
-                        y=df_agg[color_col], # 這裡是 Y 軸
+                        y=df_agg[color_col],
                         z=df_agg[y_col],
                         colorscale='Viridis'
                     ))
