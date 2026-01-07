@@ -362,8 +362,11 @@ if uploaded_files:
                 agg_func = st.selectbox("計算", agg_funcs_list, index=update_idx('agg_func', agg_funcs_list), key=f'agg_func_{uid}')
                 color_col = st.selectbox("分組", ["(無)"] + all_cols, index=update_idx('color_col', ["(無)"]+all_cols), key=f'color_col_{uid}')
             elif chart_type == "樹狀圖 (TreeMap)":
-                default_tree_path = st.session_state['treemap_path'] if st.session_state['treemap_path'] else (cat_cols[:2] if len(cat_cols)>=2 else cat_cols[:1])
-                treemap_path = st.multiselect("層級結構", cat_cols, default=default_tree_path, key=f'treemap_{uid}')
+                # 1. 先取得建議的預設值
+                raw_default = st.session_state['treemap_path'] if st.session_state['treemap_path'] else (cat_cols[:2] if len(cat_cols)>=2 else cat_cols[:1])                
+                # 2. 關鍵修正：過濾掉不存在於目前檔案的欄位 (避免 StreamlitAPIException)
+                valid_defaults = [c for c in raw_default if c in cat_cols]                
+                treemap_path = st.multiselect("層級結構", cat_cols, default=valid_defaults, key=f'treemap_{uid}')            
                 y_col = st.selectbox("數值大小", num_cols, index=update_idx('y_col', num_cols), key=f'y_col_{uid}')
                 color_col = st.selectbox("顏色依據", ["(無)"] + num_cols + cat_cols, index=update_idx('color_col', ["(無)"]+num_cols+cat_cols), key=f'color_col_{uid}')
                 agg_func = st.selectbox("計算", agg_funcs_list, index=update_idx('agg_func', agg_funcs_list), key=f'agg_func_{uid}')
@@ -392,50 +395,57 @@ if uploaded_files:
         current_chart_fig = None
         
         try:
-            agg_map = {"總和 (Sum)": "sum", "平均 (Avg)": "mean", "最大值 (Max)": "max", "計數 (Count)": "count"}
-            real_agg = agg_map[agg_func]
-            
-            use_raw_data = chart_type in RAW_DATA_CHARTS
-            
-            if use_raw_data:
-                df_agg = df.copy()
-            else:
-                if chart_type == "雙軸組合圖 (Combo)":
-                     grp_cols = [x_col]
-                     df_agg = df.groupby(grp_cols, as_index=False)[[y_col, y_col_2]].agg(real_agg)
-                elif chart_type == "樹狀圖 (TreeMap)":
-                     if not treemap_path: 
-                         df_agg = None
-                     else:
-                         # 建立聚合字典，確保 Y 軸數值被計算
-                         agg_dict = {y_col: real_agg}
-                         
-                         # 關鍵修正：如果有選顏色欄位，且它是數值型態，也要加入聚合計算，否則繪圖時會找不到欄位
-                         if color_col != "(無)" and color_col != y_col and color_col in num_cols:
-                             agg_dict[color_col] = real_agg
-                             
-                         df_agg = df.groupby(treemap_path, as_index=False).agg(agg_dict)
-                elif chart_type == "雷達圖 (Radar)":
-                     grp_cols = [x_col]
-                     if color_col != "(無)": grp_cols.append(color_col)
-                     df_agg = df.groupby(grp_cols, as_index=False)[y_col].agg(real_agg)
-                else:
-                    grp_cols = [x_col]
-                    if color_col != "(無)": grp_cols.append(color_col)
-                    df_agg = df.groupby(grp_cols, as_index=False)[y_col].agg(real_agg)
-
-            if df_agg is not None and x_col in df_agg.columns and pd.api.types.is_numeric_dtype(df_agg[x_col]):
-                col_mean = df_agg[x_col].mean()
-                if (1900 < col_mean < 2100) or (190000 < col_mean < 210012):
-                    df_agg[x_col] = df_agg[x_col].astype(str)
-
-            if chart_type in ["折線圖 (Line)", "面積圖 (Area)"] and df_agg is not None:
-                df_agg = df_agg.sort_values(by=x_col, ascending=True)
-            elif not use_raw_data and df_agg is not None and chart_type not in ["樹狀圖 (TreeMap)", "雷達圖 (Radar)"]:
-                sort_idx = st.session_state['sort_order_idx']
-                if sort_idx == 1: df_agg = df_agg.sort_values(by=y_col, ascending=False)
-                elif sort_idx == 2: df_agg = df_agg.sort_values(by=y_col, ascending=True)
-
+                    agg_map = {"總和 (Sum)": "sum", "平均 (Avg)": "mean", "最大值 (Max)": "max", "計數 (Count)": "count"}
+                    real_agg = agg_map[agg_func]
+                    
+                    use_raw_data = chart_type in RAW_DATA_CHARTS
+                    
+                    if use_raw_data:
+                        df_agg = df.copy()
+                    else:
+                        # 注意：這裡所有的 if/elif 都要縮排在 else 裡面
+                        
+                        if chart_type == "雙軸組合圖 (Combo)":
+                             grp_cols = [x_col]
+                             # 修正：使用 set 去除重複欄位，避免 y_col 和 y_col_2 相同時報錯
+                             measure_cols = list(set([y_col, y_col_2])) 
+                             df_agg = df.groupby(grp_cols, as_index=False)[measure_cols].agg(real_agg)
+                        
+                        elif chart_type == "樹狀圖 (TreeMap)":
+                             if not treemap_path: 
+                                 df_agg = None
+                             else:
+                                 agg_dict = {y_col: real_agg}
+                                 # 修正：確保顏色欄位有被計算
+                                 if color_col != "(無)" and color_col != y_col and color_col in num_cols:
+                                     agg_dict[color_col] = real_agg
+                                 df_agg = df.groupby(treemap_path, as_index=False).agg(agg_dict)
+                        
+                        elif chart_type == "雷達圖 (Radar)":
+                             grp_cols = [x_col]
+                             if color_col != "(無)": grp_cols.append(color_col)
+                             df_agg = df.groupby(grp_cols, as_index=False)[y_col].agg(real_agg)
+                        
+                        else:
+                            # 標準圖表 (Bar, Line, Pie, Area, Funnel)
+                            grp_cols = [x_col]
+                            if color_col != "(無)": grp_cols.append(color_col)
+                            df_agg = df.groupby(grp_cols, as_index=False)[y_col].agg(real_agg)
+        
+                    # --- 後處理：將數值型的年份/代碼轉為字串，避免被當成連續數值 ---
+                    if df_agg is not None and x_col in df_agg.columns and pd.api.types.is_numeric_dtype(df_agg[x_col]):
+                        col_mean = df_agg[x_col].mean()
+                        if (1900 < col_mean < 2100) or (190000 < col_mean < 210012):
+                            df_agg[x_col] = df_agg[x_col].astype(str)
+        
+                    # --- 排序設定 ---
+                    if chart_type in ["折線圖 (Line)", "面積圖 (Area)"] and df_agg is not None:
+                        df_agg = df_agg.sort_values(by=x_col, ascending=True)
+                    elif not use_raw_data and df_agg is not None and chart_type not in ["樹狀圖 (TreeMap)", "雷達圖 (Radar)"]:
+                        sort_idx = st.session_state['sort_order_idx']
+                        if sort_idx == 1: df_agg = df_agg.sort_values(by=y_col, ascending=False)
+                        elif sort_idx == 2: df_agg = df_agg.sort_values(by=y_col, ascending=True)
+                            
             if df_agg is not None:
                 common_params = {"data_frame": df_agg, "x": x_col if x_col in df_agg.columns else None, "title": f"{chart_type}: {x_col if x_col else ''}"}
                 if color_col != "(無)" and color_col in df_agg.columns: common_params["color"] = color_col
@@ -547,4 +557,5 @@ if uploaded_files:
                                     
                                     st.session_state['menu_id'] += 1
                                     st.rerun()
+
 
