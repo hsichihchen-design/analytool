@@ -35,7 +35,7 @@ for key, value in default_states.items():
 # ==========================================
 # 1. 全域設定與 CSS (空間優化版)
 # ==========================================
-st.set_page_config(page_title="作圖小工具 V80 (Lyra Time-Keeper)", layout="wide", page_icon="✨")
+st.set_page_config(page_title="作圖小工具 V81 (Lyra Senior Architect)", layout="wide", page_icon="✨")
 
 def inject_custom_css(font_family):
     google_font_import = ""
@@ -51,16 +51,11 @@ def inject_custom_css(font_family):
         {google_font_import}
         html, body, [class*="css"] {{ font-family: {font_css_rule} !important; }}
         
-        /* 核心修改：極限壓縮頂部留白 */
         .block-container {{
             padding-top: 1rem !important;
             padding-bottom: 2rem !important;
         }}
-        
-        /* 隱藏 Header 裝飾線 */
         header {{ visibility: hidden; }}
-        
-        .stDownloadButton button {{ width: 100%; border-color: #4CAF50; color: #4CAF50; }}
         
         div.stButton > button {{
             width: 100%; min-height: 40px; height: 100%; white-space: normal; word-wrap: break-word;
@@ -85,7 +80,7 @@ def inject_custom_css(font_family):
     """, unsafe_allow_html=True)
 
 # ==========================================
-# 2. 核心功能：Gemini AI 分析引擎 (智慧適應版)
+# 2. 核心功能：Gemini AI 分析引擎 (資深分析師版)
 # ==========================================
 
 def get_valid_model():
@@ -108,20 +103,16 @@ def analyze_with_gemini(df, api_key):
         model_name = get_valid_model()
         model = genai.GenerativeModel(model_name)
 
-        # ---------------------------------------------------------
         # [Step 1] 資深分析師的資料嗅探 (Advanced Profiling)
-        # ---------------------------------------------------------
         stats_info = {}
         
-        # 1. 數值欄位：計算相關性，找出「強相關」的線索
+        # 相關性掃描
         num_df = df.select_dtypes(include=['number'])
         corr_hints = []
         if len(num_df.columns) > 1:
             try:
                 corr_matrix = num_df.corr().abs()
-                # 只取上三角矩陣避免重複
                 upper = corr_matrix.where(np.triu(np.ones(corr_matrix.shape), k=1).astype(bool))
-                # 找出相關係數 > 0.5 的組合
                 strong_pairs = upper.stack().reset_index()
                 strong_pairs.columns = ['col1', 'col2', 'corr']
                 strong_pairs = strong_pairs[strong_pairs['corr'] > 0.5].sort_values(by='corr', ascending=False).head(5)
@@ -129,7 +120,6 @@ def analyze_with_gemini(df, api_key):
                     corr_hints.append(f"{row['col1']} & {row['col2']} (Corr: {row['corr']:.2f})")
             except: pass
 
-        # 2. 欄位深度掃描
         for col in df.columns:
             n_unique = df[col].nunique()
             dtype = str(df[col].dtype)
@@ -137,49 +127,38 @@ def analyze_with_gemini(df, api_key):
             col_profile = {
                 "dtype": dtype,
                 "n_unique": n_unique,
-                "missing_pct": round(df[col].isnull().mean() * 100, 1) # 缺失值比例
+                "missing_pct": round(df[col].isnull().mean() * 100, 1)
             }
             
-            # 數值型詳細特徵
             if pd.api.types.is_numeric_dtype(df[col]) and n_unique > 0:
                 col_profile["min"] = float(df[col].min())
                 col_profile["max"] = float(df[col].max())
                 col_profile["mean"] = float(df[col].mean())
-                # 簡單判斷是否為時間序列 (YYYYMM 等格式)
                 if (col_profile["max"] > 190000 and col_profile["max"] < 210012):
                     col_profile["semantic_hint"] = "可能為年月格式 (YYYYMM)"
-                elif (1900 < col_profile["mean"] < 2100):
-                    col_profile["semantic_hint"] = "可能為年份 (Year)"
-            
-            # 類別型：找出 Top 5 分佈 (這對決定圖表類型至關重要)
             else:
                 try:
                     top_counts = df[col].value_counts().head(5).to_dict()
                     col_profile["top_frequent_values"] = top_counts
                 except: pass
 
-            # 取樣
             try: col_profile["samples"] = df[col].dropna().astype(str).sample(min(3, len(df))).tolist()
             except: col_profile["samples"] = []
             
             stats_info[col] = col_profile
 
-        # 彙整給 AI 的摘要
         data_summary = {
             "columns_profile": stats_info,
-            "correlation_hints (High Priority)": corr_hints, # 告訴 AI 哪些變數有關聯
+            "correlation_hints (High Priority)": corr_hints,
             "total_rows": len(df)
         }
         
         columns_summary_json = json.dumps(data_summary, ensure_ascii=False, indent=2)
 
-        # ---------------------------------------------------------
         # [Step 2] Lyra Architect Prompt V90 - Senior Analyst Edition
-        # ---------------------------------------------------------
         prompt = f"""
         <role>
-        你是一位擁有 10 年經驗的資深數據分析總監。你不僅僅是畫圖，你是要透過數據說故事 (Data Storytelling)。
-        請分析以下數據集摘要，推斷這份資料的「業務場景 (Business Context)」，並提出具備商業洞察力的視覺化建議。
+        你是一位擁有 10 年經驗的資深數據分析總監。請分析以下數據集摘要，推斷這份資料的「業務場景」，並提出具備商業洞察力的視覺化建議。
         </role>
 
         <data_profile>
@@ -188,38 +167,38 @@ def analyze_with_gemini(df, api_key):
 
         <chart_catalog>
         標準圖表庫:
-        1. "長條圖 (Bar)": 適合比較 Top N、排名、類別差異。
-        2. "折線圖 (Line)": 適合時間趨勢、季節性分析。
-        3. "面積圖 (Area)": 適合累積量、趨勢堆疊。
-        4. "圓餅圖 (Pie)": 適合佔比 (僅當類別數 < 8 時使用)。
-        5. "雙軸組合圖 (Combo)": **強烈推薦** 用於呈現相關性 (例如: 銷售額 vs 毛利率)。
-        6. "散佈圖 (Scatter)": 用於驗證兩個數值變數的關聯分佈。
-        7. "箱型圖 (Box Plot)": 用於分析中位數、四分位距、離群值 (Outliers)。
-        8. "直方圖 (Histogram)": 用於看數值分佈形狀 (常態分佈/偏態)。
-        9. "漏斗圖 (Funnel)": **僅當** 資料有明確流程/階段 (Stage) 時使用。
-        10. "樹狀圖 (TreeMap)": 適合呈現層級佔比 (Hierarchy) 或大量類別的佔比。
-        11. "雷達圖 (Radar)": 適合多維度能力/屬性評分比較。
+        1. "長條圖 (Bar)": 比較排名、差異。
+        2. "折線圖 (Line)": 時間趨勢。
+        3. "面積圖 (Area)": 累積趨勢。
+        4. "圓餅圖 (Pie)": 佔比 (分類<8)。
+        5. "雙軸組合圖 (Combo)": **強烈推薦** 用於呈現相關性 (如: 銷售額 vs 毛利率)。
+        6. "散佈圖 (Scatter)": 變數關聯分佈。
+        7. "箱型圖 (Box Plot)": 中位數與離群值。
+        8. "直方圖 (Histogram)": 數值分佈形狀。
+        9. "漏斗圖 (Funnel)": 流程轉化。
+        10. "樹狀圖 (TreeMap)": 層級佔比。
+        11. "雷達圖 (Radar)": 多維能力評分。
         </chart_catalog>
 
         <analysis_strategy>
-        請生成 **20 個** 高價值的分析視角，必須包含以下四個維度：
-        1. **趨勢分析 (Trend)**: 時間維度的變化 (Line, Area)。
-        2. **分佈與組成 (Distribution & Composition)**: 各類別的佔比與分佈狀況 (Bar, Pie, TreeMap, Histogram)。
-        3. **關聯性挖掘 (Correlation)**: 利用 `correlation_hints` 找出變數間的關係 (Scatter, Combo)。例如：高單價產品是否利潤較低？
-        4. **異常與特徵偵測 (Anomaly & Characteristic)**: 透過箱型圖或雷達圖找出特徵 (Box Plot, Radar)。
+        請生成 **20 個** 高價值的分析視角，必須包含：
+        1. **趨勢分析**: 時間維度變化。
+        2. **分佈與組成**: 各類別佔比。
+        3. **關聯性挖掘**: 利用 correlation_hints 找出關係。
+        4. **異常偵測**: 透過箱型圖等找出特徵。
 
         <rules>
-        1. **智慧偵測**: 若欄位名稱包含 "Rate", "Ratio", "Percent", "%" 且為數值，這通常是關鍵指標 (KPI)，請多加利用。
-        2. **避免雜訊**: 如果某個類別欄位的 unique 值超過 50 個 (如 User ID)，請不要直接拿來做 X 軸 (除非是用計數)，或者建議做 Top 10 分析。
-        3. **標題優化**: 標題不要只是「X vs Y」，要帶有洞察意圖，例如「各區業績表現」而非「區域 vs 金額」。
+        1. 若欄位有 "(YM)" 後綴或為時間相關，優先用於趨勢圖的 X 軸。
+        2. 標題要帶有洞察意圖，例如「各區業績表現」而非「區域 vs 金額」。
+        3. 輸出欄位名稱時，請盡量使用 data_profile 中提供的精確欄位名稱。
         </rules>
 
         <output_format>
         Strict JSON Array only:
         [
           {{
-            "group": "分析維度 (例如: 銷售趨勢分析, 產品表現評估)",
-            "title": "具洞察力的標題 (Max 15字)",
+            "group": "分析維度 (如: 銷售趨勢)",
+            "title": "標題 (Max 15字)",
             "chart_type": "Chart Catalog 中的標準名稱",
             "x_col": "欄位名",
             "y_col": "數值欄位名",
@@ -232,7 +211,6 @@ def analyze_with_gemini(df, api_key):
 
         response = model.generate_content(prompt)
         json_str = response.text.strip()
-        # 清理 Markdown 標記
         if json_str.startswith("```json"): json_str = json_str[7:]
         if json_str.startswith("```"): json_str = json_str[3:]
         if json_str.endswith("```"): json_str = json_str[:-3]
@@ -244,68 +222,40 @@ def analyze_with_gemini(df, api_key):
         return None, f"AI 分析失敗: {str(e)}"
 
 # ==========================================
-# 3. 輔助與資料載入 (超級測試資料版)
+# 3. 輔助與資料載入
 # ==========================================
 
 @st.cache_data
 def generate_demo_excel():
     rows = 800
     start_date = datetime(2023, 1, 1)
-    
     dates = [start_date + timedelta(days=random.randint(0, 365)) for _ in range(rows)]
     ym_int = [int(d.strftime('%Y%m')) for d in dates]
-    
-    # 層級資料 (For TreeMap)
     regions = ['北區', '中區', '南區']
-    cities_map = {
-        '北區': ['台北市', '新北市', '基隆市'],
-        '中區': ['台中市', '新竹市', '苗栗縣'],
-        '南區': ['高雄市', '台南市', '嘉義市']
-    }
-    row_regions = []
-    row_cities = []
+    cities_map = {'北區': ['台北市', '新北市', '基隆市'], '中區': ['台中市', '新竹市', '苗栗縣'], '南區': ['高雄市', '台南市', '嘉義市']}
+    row_regions, row_cities = [], []
     for _ in range(rows):
         r = random.choice(regions)
-        c = random.choice(cities_map[r])
         row_regions.append(r)
-        row_cities.append(c)
-
-    # 漏斗資料 (For Funnel)
+        row_cities.append(cities_map[r][random.randint(0, len(cities_map[r])-1)])
     stages = ['1_瀏覽商品', '2_加入購物車', '3_結帳流程', '4_完成訂單']
-    weights = [0.4, 0.3, 0.2, 0.1]
-    row_stages = random.choices(stages, weights=weights, k=rows)
-
-    # 雷達圖評分資料 (For Radar)
+    row_stages = random.choices(stages, weights=[0.4, 0.3, 0.2, 0.1], k=rows)
     products = ['旗艦機 Pro', '輕旗艦 Air', '入門機 SE', '電競機 GT']
     row_products = [random.choice(products) for _ in range(rows)]
-    
     prices = np.random.randint(5000, 40000, rows)
     units = np.random.randint(1, 10, rows)
     sales = prices * units
     margins = np.random.uniform(0.1, 0.4, rows)
     profit = sales * margins
-    
     df = pd.DataFrame({
-        '訂單日期': dates,
-        '年月份': ym_int,
-        '大區域': row_regions,
-        '城市': row_cities,
-        '產品型號': row_products,
-        '銷售階段': row_stages,
-        '訂單金額': sales,
-        '訂單利潤': profit,
-        '毛利率': margins,
-        '折扣率': np.random.choice([0, 0.05, 0.1, 0.2], rows),
+        '訂單日期': dates, '年月份': ym_int, '大區域': row_regions, '城市': row_cities,
+        '產品型號': row_products, '銷售階段': row_stages, '訂單金額': sales, '訂單利潤': profit,
+        '毛利率': margins, '折扣率': np.random.choice([0, 0.05, 0.1, 0.2], rows),
         '運送天數': np.random.randint(1, 7, rows),
-        '效能評分': np.random.randint(6, 10, rows),
-        '外觀評分': np.random.randint(5, 10, rows),
-        'CP值評分': np.random.randint(4, 10, rows),
-        '售後評分': np.random.randint(6, 10, rows),
+        '效能評分': np.random.randint(6, 10, rows), '外觀評分': np.random.randint(5, 10, rows),
+        'CP值評分': np.random.randint(4, 10, rows), '售後評分': np.random.randint(6, 10, rows),
         '續航評分': np.random.randint(5, 10, rows)
     })
-    
-    df.loc[0:5, '訂單金額'] = df.loc[0:5, '訂單金額'] * 5 
-    
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
         df.to_excel(writer, index=False)
@@ -330,7 +280,7 @@ def load_data(file):
 # ==========================================
 
 with st.sidebar:
-    st.markdown("### ✨ Lyra V80")
+    st.markdown("### ✨ Lyra V81")
     st.header("1. 資料來源")
     st.session_state['gemini_api_key'] = st.text_input("🔑 Gemini API Key", value=st.session_state['gemini_api_key'], type="password")
     
@@ -343,8 +293,8 @@ with st.sidebar:
             except Exception as e: st.error(f"連線失敗: {e}")
 
     st.markdown("---")
-    with st.expander("📥 超級測試資料 (全圖表驗證)"):
-        st.caption("此資料包含：層級、漏斗階段、多維評分，可驗證所有 11 種圖表。")
+    with st.expander("📥 超級測試資料"):
+        st.caption("包含層級、漏斗、多維評分。")
         if st.button("🎲 生成測試資料"):
             st.download_button("📊 下載 Excel", generate_demo_excel(), "Lyra_Full_Test_Data.xlsx")
 
@@ -368,7 +318,7 @@ if uploaded_files:
     df = load_data(file_map[selected_file_name])
     
     if df is not None:
-        # 時間粒度
+        # 時間粒度增強
         date_cols = [c for c in df.columns if pd.api.types.is_datetime64_any_dtype(df[c])]
         for col in date_cols:
             df[f"{col}(YM)"] = df[col].dt.strftime('%Y-%m')
@@ -392,17 +342,14 @@ if uploaded_files:
 
             # 1. 圖表類型
             chart_type_idx = update_idx('chart_type', CHART_TYPES)
-            chart_type = st.selectbox(
-                "圖表類型", CHART_TYPES, 
-                index=chart_type_idx, 
-                key=f"chart_type_{uid}"
-            )
+            chart_type = st.selectbox("圖表類型", CHART_TYPES, index=chart_type_idx, key=f"chart_type_{uid}")
             if chart_type in CHART_TYPES:
                 st.session_state['chart_type_idx'] = CHART_TYPES.index(chart_type)
 
-            # --- [Critical Fix] 初始化變數，避免特定圖表 (如 TreeMap) 略過定義導致 NameError ---
-            x_col = None
-            y_col_2 = None
+            # [Critical Fix] 初始化所有繪圖變數，避免 NameError
+            x_col, y_col, y_col_2, color_col = None, None, None, "(無)"
+            agg_func = "總和 (Sum)"
+            treemap_path = []
 
             # UI 條件渲染
             if chart_type == "雙軸組合圖 (Combo)":
@@ -410,11 +357,10 @@ if uploaded_files:
                 y_col = st.selectbox("左軸數值", num_cols, index=update_idx('y_col', num_cols), key=f'y_col_{uid}')
                 y_col_2 = st.selectbox("右軸數值", num_cols, index=update_idx('y_col_2', num_cols), key=f'y_col_2_{uid}')
                 agg_func = st.selectbox("計算", agg_funcs_list, index=update_idx('agg_func', agg_funcs_list), key=f'agg_func_{uid}')
-                color_col = st.selectbox("分組", ["(無)"] + all_cols, index=update_idx('color_col', ["(無)"]+all_cols), key=f'color_col_{uid}')
+                # 雙軸圖不開放 color 分組，避免混淆
+                color_col = "(無)" 
             elif chart_type == "樹狀圖 (TreeMap)":
-                # 1. 先取得建議的預設值
                 raw_default = st.session_state['treemap_path'] if st.session_state['treemap_path'] else (cat_cols[:2] if len(cat_cols)>=2 else cat_cols[:1])                
-                # 2. 關鍵修正：過濾掉不存在於目前檔案的欄位 (避免 StreamlitAPIException)
                 valid_defaults = [c for c in raw_default if c in cat_cols]                
                 treemap_path = st.multiselect("層級結構", cat_cols, default=valid_defaults, key=f'treemap_{uid}')            
                 y_col = st.selectbox("數值大小", num_cols, index=update_idx('y_col', num_cols), key=f'y_col_{uid}')
@@ -431,13 +377,13 @@ if uploaded_files:
                 agg_func = st.selectbox("計算", agg_funcs_list, index=update_idx('agg_func', agg_funcs_list), key=f'agg_func_{uid}')
                 color_col = st.selectbox("分組", ["(無)"] + all_cols, index=update_idx('color_col', ["(無)"]+all_cols), key=f'color_col_{uid}')
             
-            # 手動同步邏輯
-            if 'x_col' in locals() and x_col and x_col in all_cols: st.session_state['x_col_idx'] = all_cols.index(x_col)
-            if 'y_col' in locals() and y_col in num_cols: st.session_state['y_col_idx'] = num_cols.index(y_col)
-            if 'y_col_2' in locals() and y_col_2 and y_col_2 in num_cols: st.session_state['y_col_2_idx'] = num_cols.index(y_col_2)
-            if 'color_col' in locals() and color_col in (["(無)"] + all_cols): st.session_state['color_col_idx'] = (["(無)"] + all_cols).index(color_col)
-            if 'agg_func' in locals() and agg_func in agg_funcs_list: st.session_state['agg_func_idx'] = agg_funcs_list.index(agg_func)
-            if 'treemap_path' in locals(): st.session_state['treemap_path'] = treemap_path
+            # 手動同步
+            if x_col and x_col in all_cols: st.session_state['x_col_idx'] = all_cols.index(x_col)
+            if y_col and y_col in num_cols: st.session_state['y_col_idx'] = num_cols.index(y_col)
+            if y_col_2 and y_col_2 in num_cols: st.session_state['y_col_2_idx'] = num_cols.index(y_col_2)
+            if color_col in (["(無)"] + all_cols): st.session_state['color_col_idx'] = (["(無)"] + all_cols).index(color_col)
+            if agg_func in agg_funcs_list: st.session_state['agg_func_idx'] = agg_funcs_list.index(agg_func)
+            if treemap_path: st.session_state['treemap_path'] = treemap_path
 
         # ==========================================
         # 5. 優先執行繪圖引擎
@@ -448,7 +394,6 @@ if uploaded_files:
         try:
             agg_map = {"總和 (Sum)": "sum", "平均 (Avg)": "mean", "最大值 (Max)": "max", "計數 (Count)": "count"}
             real_agg = agg_map[agg_func]
-            
             use_raw_data = chart_type in RAW_DATA_CHARTS
             
             if use_raw_data:
@@ -456,47 +401,39 @@ if uploaded_files:
             else:
                 if chart_type == "雙軸組合圖 (Combo)":
                      grp_cols = [x_col]
-                     # 修正：使用 set 去除重複欄位
                      measure_cols = list(set([y_col, y_col_2])) 
                      df_agg = df.groupby(grp_cols, as_index=False)[measure_cols].agg(real_agg)
-                
                 elif chart_type == "樹狀圖 (TreeMap)":
-                     if not treemap_path: 
-                         df_agg = None
+                     if not treemap_path: df_agg = None
                      else:
                          agg_dict = {y_col: real_agg}
-                         # 修正：確保顏色欄位有被計算
                          if color_col != "(無)" and color_col != y_col and color_col in num_cols:
                              agg_dict[color_col] = real_agg
                          df_agg = df.groupby(treemap_path, as_index=False).agg(agg_dict)
-                
                 elif chart_type == "雷達圖 (Radar)":
                      grp_cols = [x_col]
                      if color_col != "(無)": grp_cols.append(color_col)
                      df_agg = df.groupby(grp_cols, as_index=False)[y_col].agg(real_agg)
-                
                 else:
-                    # 標準圖表
                     grp_cols = [x_col]
                     if color_col != "(無)": grp_cols.append(color_col)
                     df_agg = df.groupby(grp_cols, as_index=False)[y_col].agg(real_agg)
 
-            # --- 後處理：將數值型的年份/代碼轉為字串 ---
-            # 修正：增加對 x_col 是否存在的檢查，防止 TreeMap 報錯
+            # 後處理：數值轉字串
             if df_agg is not None and x_col and x_col in df_agg.columns and pd.api.types.is_numeric_dtype(df_agg[x_col]):
                 col_mean = df_agg[x_col].mean()
                 if (1900 < col_mean < 2100) or (190000 < col_mean < 210012):
                     df_agg[x_col] = df_agg[x_col].astype(str)
 
-            # --- 排序設定 ---
-            if chart_type in ["折線圖 (Line)", "面積圖 (Area)"] and df_agg is not None:
+            # [Fix] 強制排序避免雙軸圖亂跑
+            if chart_type in ["折線圖 (Line)", "面積圖 (Area)", "雙軸組合圖 (Combo)"] and df_agg is not None and x_col:
                 df_agg = df_agg.sort_values(by=x_col, ascending=True)
             elif not use_raw_data and df_agg is not None and chart_type not in ["樹狀圖 (TreeMap)", "雷達圖 (Radar)"]:
                 sort_idx = st.session_state['sort_order_idx']
                 if sort_idx == 1: df_agg = df_agg.sort_values(by=y_col, ascending=False)
                 elif sort_idx == 2: df_agg = df_agg.sort_values(by=y_col, ascending=True)
             
-            # --- 繪製圖表 ---
+            # 繪圖
             if df_agg is not None:
                 common_params = {"data_frame": df_agg, "x": x_col if (x_col and x_col in df_agg.columns) else None, "title": f"{chart_type}: {x_col if x_col else ''}"}
                 if color_col != "(無)" and color_col in df_agg.columns: common_params["color"] = color_col
@@ -532,7 +469,7 @@ if uploaded_files:
             st.error(f"繪圖錯誤: {e}")
 
         # -------------------------------------------------------
-        # [UI 優化] 顯示圖表 (Hero Section)
+        # 顯示圖表
         # -------------------------------------------------------
         if current_chart_fig:
             current_chart_fig.update_layout(
@@ -547,7 +484,7 @@ if uploaded_files:
             st.info("👈 請從左側選擇圖表類型，或等待下方 AI 產生建議。")
 
         # ==========================================
-        # 6. AI 分析與控制面板 (Controls Section)
+        # 6. AI 分析與控制面板 (Fix: Fuzzy Matching)
         # ==========================================
         
         if st.session_state['gemini_api_key']:
@@ -558,6 +495,16 @@ if uploaded_files:
                         st.session_state['ai_insights'] = insights
                         st.session_state['last_analyzed_file'] = selected_file_name
             
+            # [Helper] 模糊搜尋：從 candidates 中找到最像 target 的欄位
+            def find_best_match(target, candidates):
+                if not target: return None
+                if target in candidates: return target
+                # 簡單模糊：包含關鍵字
+                for c in candidates:
+                    if target in c or c in target:
+                        return c
+                return None
+
             if st.session_state.get('ai_insights'):
                 insights = st.session_state['ai_insights']
                 groups = sorted(list(set(ins['group'] for ins in insights)))
@@ -584,14 +531,17 @@ if uploaded_files:
                                     try: st.session_state['chart_type_idx'] = CHART_TYPES.index(matched_type)
                                     except: st.session_state['chart_type_idx'] = 0
 
-                                    def sync(key, val, candidates):
-                                        if val in candidates: 
-                                            st.session_state[f"{key}_idx"] = candidates.index(val)
+                                    def sync(key, ai_val, candidates):
+                                        # 使用模糊匹配找到最佳對應欄位
+                                        best_val = find_best_match(ai_val, candidates)
+                                        if best_val: 
+                                            st.session_state[f"{key}_idx"] = candidates.index(best_val)
                                         else: 
                                             st.session_state[f"{key}_idx"] = 0
                                     
                                     sync('x_col', insight.get('x_col'), all_cols)
                                     sync('y_col', insight.get('y_col'), num_cols)
+                                    # 雙軸圖右軸若 AI 沒給，預設跟左軸一樣 (避免報錯) 或嘗試找提示
                                     sync('y_col_2', insight.get('y_col'), num_cols) 
                                     sync('color_col', insight.get('color_col'), ["(無)"]+all_cols)
                                     
@@ -600,12 +550,13 @@ if uploaded_files:
                                     elif sort_str == 'asc': st.session_state['sort_order_idx'] = 2
                                     else: st.session_state['sort_order_idx'] = 0
                                     
-                                    if matched_type == "樹狀圖 (TreeMap)" and insight.get('x_col'):
-                                         st.session_state['treemap_path'] = [insight.get('x_col')]
-                                         # 自動補上第二層 (若有的話)
-                                         if '城市' in all_cols and insight.get('x_col') == '大區域':
-                                             st.session_state['treemap_path'] = ['大區域', '城市']
+                                    if matched_type == "樹狀圖 (TreeMap)":
+                                        target_x = find_best_match(insight.get('x_col'), cat_cols)
+                                        if target_x:
+                                            st.session_state['treemap_path'] = [target_x]
+                                            # 自動嘗試補第二層
+                                            if '城市' in all_cols and target_x == '大區域':
+                                                st.session_state['treemap_path'] = ['大區域', '城市']
                                     
                                     st.session_state['menu_id'] += 1
                                     st.rerun()
-
