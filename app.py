@@ -516,7 +516,16 @@ if uploaded_files:
                     if color_col != "(無)" and color_col in df_agg.columns: common_params["color"] = color_col
 
                 if chart_type == "長條圖 (Bar)":
-                    current_chart_fig = px.bar(**common_params, y=y_col, text_auto='.2s')
+                                    current_chart_fig = px.bar(**common_params, y=y_col, text_auto='.2s')
+                                    
+                                    # --- FIX START: 強制處理排序 ---
+                                    if sort_idx == 1: # Desc (大 -> 小)
+                                        # type='category' 告訴 Plotly 把數字當文字看，允許打亂順序
+                                        # categoryorder='total descending' 依照數值總和排序
+                                        current_chart_fig.update_xaxes(type='category', categoryorder='total descending')
+                                    elif sort_idx == 2: # Asc (小 -> 大)
+                                        current_chart_fig.update_xaxes(type='category', categoryorder='total ascending')
+                                    # --- FIX END ---
                 elif chart_type == "折線圖 (Line)":
                     current_chart_fig = px.line(**common_params, y=y_col, markers=True)
                 elif chart_type == "面積圖 (Area)":
@@ -647,3 +656,4 @@ if uploaded_files:
                                     
                                     st.session_state['menu_id'] += 1
                                     st.rerun()
+
