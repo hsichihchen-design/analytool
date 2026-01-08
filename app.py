@@ -36,7 +36,7 @@ for key, value in default_states.items():
 # ==========================================
 # 1. 全域設定與 CSS
 # ==========================================
-st.set_page_config(page_title="作圖小工具 V89 (Filter+Sort)", layout="wide", page_icon="✨")
+st.set_page_config(page_title="作圖小工具 V91 (Robust)", layout="wide", page_icon="✨")
 
 def inject_custom_css(font_family):
     google_font_import = ""
@@ -70,11 +70,12 @@ def inject_custom_css(font_family):
             border-bottom: 1px solid #eee;
             font-family: {font_css_rule} !important;
         }}
+        .stAlert {{ padding: 0.5rem; }}
     </style>
     """, unsafe_allow_html=True)
 
 # ==========================================
-# 2. 核心功能：Gemini AI 分析引擎 (V88 Expanded)
+# 2. 核心功能：Gemini AI 分析引擎
 # ==========================================
 
 def get_valid_model():
@@ -236,6 +237,25 @@ def find_best_match(target, candidates):
             return c
     return None
 
+# NEW: 輕量級驗證器 (不耗效能)
+def is_insight_valid(insight, df_cols, num_cols):
+    # 1. 檢查欄位是否存在
+    required_cols = []
+    if insight.get('x_col'): required_cols.append(insight['x_col'])
+    if insight.get('y_col'): required_cols.append(insight['y_col'])
+    if insight.get('color_col') and insight['color_col'] != "(無)": required_cols.append(insight['color_col'])
+    
+    for col in required_cols:
+        if col not in df_cols: return False
+    
+    # 2. 檢查數值欄位合理性 (若是 Bar/Line/Scatter, Y 必須是數值)
+    chart_type = insight.get('chart_type', '')
+    if any(t in chart_type for t in ['Bar', 'Line', 'Scatter', 'Area', 'Histogram', 'Box']) and insight.get('y_col'):
+        if insight['y_col'] not in num_cols:
+            return False
+
+    return True
+
 # ==========================================
 # 3. 輔助與資料載入
 # ==========================================
@@ -295,7 +315,7 @@ def load_data(file):
 # ==========================================
 
 with st.sidebar:
-    st.markdown("### ✨ Lyra V89")
+    st.markdown("### ✨ Lyra V91")
     st.header("1. 資料來源")
     st.session_state['gemini_api_key'] = st.text_input("🔑 Gemini API Key", value=st.session_state['gemini_api_key'], type="password")
     
@@ -338,7 +358,7 @@ if uploaded_files:
             df[f"{col}(YM)"] = df[col].dt.strftime('%Y-%m')
 
         # ----------------------------------------------------
-        # 新增功能: 3. 資料篩選 (類似 Pivot Filter)
+        # 3. 進階篩選 (Filter)
         # ----------------------------------------------------
         temp_cat_cols = df.select_dtypes(exclude=['number', 'datetime']).columns.tolist()
         
@@ -362,7 +382,7 @@ if uploaded_files:
             st.toast(f"已套用篩選，剩餘 {len(df)} 筆資料")
 
         # ----------------------------------------------------
-        # 重新計算欄位清單 (基於篩選後的資料)
+        # 重新計算欄位清單
         # ----------------------------------------------------
         num_cols = df.select_dtypes(include=['number']).columns.tolist()
         cat_cols = df.select_dtypes(exclude=['number', 'datetime']).columns.tolist()
@@ -425,7 +445,7 @@ if uploaded_files:
                 agg_func = st.selectbox("計算", agg_funcs_list, index=update_idx('agg_func', agg_funcs_list), key=f'agg_func_{uid}')
                 color_col = st.selectbox("分組", ["(無)"] + all_cols, index=update_idx('color_col', ["(無)"]+all_cols), key=f'color_col_{uid}')
             
-            # 手動排序設定 (包含直方圖支援)
+            # 手動排序設定
             sort_options = ["不排序 (None)", "數值大 -> 小 (Desc)", "數值小 -> 大 (Asc)"]
             current_sort = st.session_state.get('sort_order_idx', 0)
             sort_label = st.selectbox("排序方式", sort_options, index=current_sort, key=f"sort_sel_{uid}")
@@ -442,16 +462,18 @@ if uploaded_files:
             if treemap_path: st.session_state['treemap_path'] = treemap_path
 
         # ==========================================
-        # 5. 優先執行繪圖引擎
+        # 5. 優先執行繪圖引擎 (含容錯機制)
         # ==========================================
         current_chart_fig = None
         df_agg = None
-        
+        plot_error_msg = None
+
         try:
             agg_map = {"總和 (Sum)": "sum", "平均 (Avg)": "mean", "最大值 (Max)": "max", "計數 (Count)": "count"}
             real_agg = agg_map[agg_func]
             use_raw_data = chart_type in RAW_DATA_CHARTS
             
+            # 1. 資料聚合 (Aggregation)
             if use_raw_data:
                 df_agg = df.copy()
             else:
@@ -472,8 +494,6 @@ if uploaded_files:
                      grp_cols = [x_col]
                      if color_col != "(無)" and color_col != x_col: grp_cols.append(color_col)
                      df_agg = df.groupby(grp_cols, as_index=False)[y_col].agg(real_agg)
-                     # FIX: 雷達圖必須確保 X 軸 (Theta) 是字串，避免被當成連續數值運算
-                     df_agg[x_col] = df_agg[x_col].astype(str)
                 
                 elif chart_type == "熱力圖 (Heatmap)":
                      grp_cols = [x_col, color_col] 
@@ -484,24 +504,28 @@ if uploaded_files:
                      df_agg = df.groupby(grp_cols, as_index=False)[y_col].agg(real_agg)
 
                 else:
-                    # 標準圖表
                     grp_cols = [x_col]
                     if color_col != "(無)" and color_col != x_col: 
                         grp_cols.append(color_col)
                     df_agg = df.groupby(grp_cols, as_index=False)[y_col].agg(real_agg)
 
-            # 後處理：數值轉字串
-            if df_agg is not None and x_col and x_col in df_agg.columns and pd.api.types.is_numeric_dtype(df_agg[x_col]):
-                col_mean = df_agg[x_col].mean()
-                if (1900 < col_mean < 2100) or (190000 < col_mean < 210012):
-                    df_agg[x_col] = df_agg[x_col].astype(str)
-            
-            if chart_type == "熱力圖 (Heatmap)" and df_agg is not None and color_col in df_agg.columns and pd.api.types.is_numeric_dtype(df_agg[color_col]):
-                 col_mean = df_agg[color_col].mean()
-                 if (1900 < col_mean < 2100) or (190000 < col_mean < 210012):
-                    df_agg[color_col] = df_agg[color_col].astype(str)
+            # 2. 自動清洗 (Robust Cleaning) - 解決 '<' not supported 錯誤
+            if df_agg is not None and x_col and x_col in df_agg.columns:
+                 # 若非數值型，強制轉為字串，避免排序報錯
+                 if not pd.api.types.is_numeric_dtype(df_agg[x_col]):
+                     df_agg[x_col] = df_agg[x_col].astype(str)
+                 
+                 # 特例：如果是年份等數值，雖然是數字但我們常希望視為類別
+                 if pd.api.types.is_numeric_dtype(df_agg[x_col]):
+                    col_mean = df_agg[x_col].mean()
+                    if (1900 < col_mean < 2100) or (190000 < col_mean < 210012):
+                        df_agg[x_col] = df_agg[x_col].astype(str)
 
-            # 強制排序 (Aggregated Data)
+            if chart_type == "熱力圖 (Heatmap)" and df_agg is not None and color_col in df_agg.columns:
+                 if not pd.api.types.is_numeric_dtype(df_agg[color_col]):
+                     df_agg[color_col] = df_agg[color_col].astype(str)
+
+            # 3. 排序 (Sorting)
             sort_idx = st.session_state['sort_order_idx']
             if chart_type in ["折線圖 (Line)", "面積圖 (Area)", "雙軸組合圖 (Combo)", "瀑布圖 (Waterfall)"] and df_agg is not None and x_col:
                 df_agg = df_agg.sort_values(by=x_col, ascending=True)
@@ -509,23 +533,17 @@ if uploaded_files:
                 if sort_idx == 1: df_agg = df_agg.sort_values(by=y_col, ascending=False)
                 elif sort_idx == 2: df_agg = df_agg.sort_values(by=y_col, ascending=True)
             
-            # 繪圖
+            # 4. 繪圖 (Plotting)
             if df_agg is not None:
                 common_params = {"data_frame": df_agg, "x": x_col if (x_col and x_col in df_agg.columns) else None, "title": f"{chart_type}: {x_col if x_col else ''}"}
                 if chart_type not in ["熱力圖 (Heatmap)", "瀑布圖 (Waterfall)"]:
                     if color_col != "(無)" and color_col in df_agg.columns: common_params["color"] = color_col
 
                 if chart_type == "長條圖 (Bar)":
-                                    current_chart_fig = px.bar(**common_params, y=y_col, text_auto='.2s')
-                                    
-                                    # --- FIX START: 強制處理排序 ---
-                                    if sort_idx == 1: # Desc (大 -> 小)
-                                        # type='category' 告訴 Plotly 把數字當文字看，允許打亂順序
-                                        # categoryorder='total descending' 依照數值總和排序
-                                        current_chart_fig.update_xaxes(type='category', categoryorder='total descending')
-                                    elif sort_idx == 2: # Asc (小 -> 大)
-                                        current_chart_fig.update_xaxes(type='category', categoryorder='total ascending')
-                                    # --- FIX END ---
+                    current_chart_fig = px.bar(**common_params, y=y_col, text_auto='.2s')
+                    if sort_idx == 1: current_chart_fig.update_xaxes(type='category', categoryorder='total descending')
+                    elif sort_idx == 2: current_chart_fig.update_xaxes(type='category', categoryorder='total ascending')
+
                 elif chart_type == "折線圖 (Line)":
                     current_chart_fig = px.line(**common_params, y=y_col, markers=True)
                 elif chart_type == "面積圖 (Area)":
@@ -542,19 +560,21 @@ if uploaded_files:
                 elif chart_type == "樹狀圖 (TreeMap)":
                     current_chart_fig = px.treemap(df_agg, path=treemap_path, values=y_col, color=color_col if color_col!="(無)" else y_col, title="層級分析")
                 elif chart_type == "雷達圖 (Radar)":
+                     # 雷達圖特例：避免 Plotly 內部 'shape' 錯誤，確保參數單純
+                     df_agg[x_col] = df_agg[x_col].astype(str) # 強制 String
                      current_chart_fig = px.line_polar(df_agg, r=y_col, theta=x_col, line_close=True, color=color_col if color_col != "(無)" else None, title="雷達分析")
                      current_chart_fig.update_traces(fill='toself')
                 
                 elif chart_type == "直方圖 (Histogram)":
-                    # FIX: 支援直方圖依照計數排序
                     current_chart_fig = px.histogram(df_agg, x=x_col, color=color_col if color_col!="(無)" else None, title=f"{x_col} 分佈")
-                    if sort_idx == 1:
-                        current_chart_fig.update_xaxes(categoryorder='total descending')
-                    elif sort_idx == 2:
-                        current_chart_fig.update_xaxes(categoryorder='total ascending')
+                    if sort_idx == 1: current_chart_fig.update_xaxes(type='category', categoryorder='total descending')
+                    elif sort_idx == 2: current_chart_fig.update_xaxes(type='category', categoryorder='total ascending')
                 
                 elif chart_type == "箱型圖 (Box Plot)":
                     current_chart_fig = px.box(df_agg, x=x_col, y=y_col, color=color_col if color_col!="(無)" else None, title=f"{y_col} 分佈 (by {x_col})")
+                    if sort_idx == 1: current_chart_fig.update_xaxes(type='category', categoryorder='total descending')
+                    elif sort_idx == 2: current_chart_fig.update_xaxes(type='category', categoryorder='total ascending')
+
                 elif chart_type == "散佈圖 (Scatter)":
                     current_chart_fig = px.scatter(df_agg, x=x_col, y=y_col, color=color_col if color_col!="(無)" else None, title=f"{x_col} vs {y_col}")
                 elif chart_type == "熱力圖 (Heatmap)":
@@ -574,7 +594,7 @@ if uploaded_files:
                     current_chart_fig.update_layout(title=f"瀑布圖: {y_col} (by {x_col})")
 
         except Exception as e:
-            st.error(f"繪圖錯誤: {e}")
+            plot_error_msg = str(e) # 捕捉錯誤但不直接顯示醜醜的 traceback
 
         # -------------------------------------------------------
         # 顯示圖表
@@ -588,6 +608,9 @@ if uploaded_files:
                 hovermode="x unified"
             )
             st.plotly_chart(current_chart_fig, use_container_width=True)
+        elif plot_error_msg:
+            # 優雅的錯誤提示
+            st.warning(f"⚠️ 無法繪製此圖表：資料格式可能不支援。建議更換 X/Y 軸或選擇其他圖表。({plot_error_msg})")
         else:
             st.info("👈 請從左側選擇圖表類型，或等待下方 AI 產生建議。")
 
@@ -616,7 +639,11 @@ if uploaded_files:
                         st.markdown(f"<div class='group-header'>{group_name}</div>", unsafe_allow_html=True)
                         cols = st.columns(5)
                         group_insights = [ins for ins in insights if ins['group'] == group_name]
-                        for i, insight in enumerate(group_insights):
+                        
+                        # 顯示按鈕前，先過濾掉「必死」的建議
+                        valid_insights = [ins for ins in group_insights if is_insight_valid(ins, all_cols, num_cols)]
+                        
+                        for i, insight in enumerate(valid_insights):
                             with cols[i % 5]:
                                 if st.button(insight['title'], key=f"btn_{group_name}_{i}"):
                                     raw_type = insight.get('chart_type', '')
@@ -656,4 +683,3 @@ if uploaded_files:
                                     
                                     st.session_state['menu_id'] += 1
                                     st.rerun()
-
