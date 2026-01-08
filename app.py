@@ -36,7 +36,7 @@ for key, value in default_states.items():
 # ==========================================
 # 1. 全域設定與 CSS
 # ==========================================
-st.set_page_config(page_title="作圖小工具 V88 (Deep Insight 30)", layout="wide", page_icon="✨")
+st.set_page_config(page_title="作圖小工具 V89 (Filter+Sort)", layout="wide", page_icon="✨")
 
 def inject_custom_css(font_family):
     google_font_import = ""
@@ -295,7 +295,7 @@ def load_data(file):
 # ==========================================
 
 with st.sidebar:
-    st.markdown("### ✨ Lyra V88")
+    st.markdown("### ✨ Lyra V89")
     st.header("1. 資料來源")
     st.session_state['gemini_api_key'] = st.text_input("🔑 Gemini API Key", value=st.session_state['gemini_api_key'], type="password")
     
@@ -337,6 +337,33 @@ if uploaded_files:
         for col in date_cols:
             df[f"{col}(YM)"] = df[col].dt.strftime('%Y-%m')
 
+        # ----------------------------------------------------
+        # 新增功能: 3. 資料篩選 (類似 Pivot Filter)
+        # ----------------------------------------------------
+        temp_cat_cols = df.select_dtypes(exclude=['number', 'datetime']).columns.tolist()
+        
+        with st.sidebar:
+            st.markdown("---")
+            with st.expander("🔎 3. 進階篩選 (Filter)", expanded=False):
+                st.markdown("類似 Excel 篩選功能，此處篩選會影響後續所有圖表。")
+                filter_targets = st.multiselect("選擇篩選欄位", temp_cat_cols)
+                
+                active_filters = {}
+                for col in filter_targets:
+                    unique_vals = sorted(df[col].astype(str).unique())
+                    selected_vals = st.multiselect(f"保留 {col} 的值", unique_vals, default=unique_vals)
+                    if selected_vals:
+                        active_filters[col] = selected_vals
+        
+        # 執行篩選
+        if active_filters:
+            for col, vals in active_filters.items():
+                df = df[df[col].astype(str).isin(vals)]
+            st.toast(f"已套用篩選，剩餘 {len(df)} 筆資料")
+
+        # ----------------------------------------------------
+        # 重新計算欄位清單 (基於篩選後的資料)
+        # ----------------------------------------------------
         num_cols = df.select_dtypes(include=['number']).columns.tolist()
         cat_cols = df.select_dtypes(exclude=['number', 'datetime']).columns.tolist()
         all_cols = df.columns.tolist()
@@ -398,6 +425,14 @@ if uploaded_files:
                 agg_func = st.selectbox("計算", agg_funcs_list, index=update_idx('agg_func', agg_funcs_list), key=f'agg_func_{uid}')
                 color_col = st.selectbox("分組", ["(無)"] + all_cols, index=update_idx('color_col', ["(無)"]+all_cols), key=f'color_col_{uid}')
             
+            # 手動排序設定 (包含直方圖支援)
+            sort_options = ["不排序 (None)", "數值大 -> 小 (Desc)", "數值小 -> 大 (Asc)"]
+            current_sort = st.session_state.get('sort_order_idx', 0)
+            sort_label = st.selectbox("排序方式", sort_options, index=current_sort, key=f"sort_sel_{uid}")
+            if "Desc" in sort_label: st.session_state['sort_order_idx'] = 1
+            elif "Asc" in sort_label: st.session_state['sort_order_idx'] = 2
+            else: st.session_state['sort_order_idx'] = 0
+
             # 手動同步
             if x_col and x_col in all_cols: st.session_state['x_col_idx'] = all_cols.index(x_col)
             if y_col and y_col in num_cols: st.session_state['y_col_idx'] = num_cols.index(y_col)
@@ -437,6 +472,8 @@ if uploaded_files:
                      grp_cols = [x_col]
                      if color_col != "(無)" and color_col != x_col: grp_cols.append(color_col)
                      df_agg = df.groupby(grp_cols, as_index=False)[y_col].agg(real_agg)
+                     # FIX: 雷達圖必須確保 X 軸 (Theta) 是字串，避免被當成連續數值運算
+                     df_agg[x_col] = df_agg[x_col].astype(str)
                 
                 elif chart_type == "熱力圖 (Heatmap)":
                      grp_cols = [x_col, color_col] 
@@ -447,7 +484,7 @@ if uploaded_files:
                      df_agg = df.groupby(grp_cols, as_index=False)[y_col].agg(real_agg)
 
                 else:
-                    # 標準圖表: 加入防呆，如果分組欄位跟 X 軸一樣，就不要重複加入
+                    # 標準圖表
                     grp_cols = [x_col]
                     if color_col != "(無)" and color_col != x_col: 
                         grp_cols.append(color_col)
@@ -464,11 +501,11 @@ if uploaded_files:
                  if (1900 < col_mean < 2100) or (190000 < col_mean < 210012):
                     df_agg[color_col] = df_agg[color_col].astype(str)
 
-            # 強制排序
+            # 強制排序 (Aggregated Data)
+            sort_idx = st.session_state['sort_order_idx']
             if chart_type in ["折線圖 (Line)", "面積圖 (Area)", "雙軸組合圖 (Combo)", "瀑布圖 (Waterfall)"] and df_agg is not None and x_col:
                 df_agg = df_agg.sort_values(by=x_col, ascending=True)
             elif not use_raw_data and df_agg is not None and chart_type not in ["樹狀圖 (TreeMap)", "雷達圖 (Radar)", "熱力圖 (Heatmap)"]:
-                sort_idx = st.session_state['sort_order_idx']
                 if sort_idx == 1: df_agg = df_agg.sort_values(by=y_col, ascending=False)
                 elif sort_idx == 2: df_agg = df_agg.sort_values(by=y_col, ascending=True)
             
@@ -498,8 +535,15 @@ if uploaded_files:
                 elif chart_type == "雷達圖 (Radar)":
                      current_chart_fig = px.line_polar(df_agg, r=y_col, theta=x_col, line_close=True, color=color_col if color_col != "(無)" else None, title="雷達分析")
                      current_chart_fig.update_traces(fill='toself')
+                
                 elif chart_type == "直方圖 (Histogram)":
+                    # FIX: 支援直方圖依照計數排序
                     current_chart_fig = px.histogram(df_agg, x=x_col, color=color_col if color_col!="(無)" else None, title=f"{x_col} 分佈")
+                    if sort_idx == 1:
+                        current_chart_fig.update_xaxes(categoryorder='total descending')
+                    elif sort_idx == 2:
+                        current_chart_fig.update_xaxes(categoryorder='total ascending')
+                
                 elif chart_type == "箱型圖 (Box Plot)":
                     current_chart_fig = px.box(df_agg, x=x_col, y=y_col, color=color_col if color_col!="(無)" else None, title=f"{y_col} 分佈 (by {x_col})")
                 elif chart_type == "散佈圖 (Scatter)":
